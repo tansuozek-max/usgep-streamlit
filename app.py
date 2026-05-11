@@ -330,7 +330,7 @@ if test_modu in TEST_ISTASYONLARI:
             type="password"
         )
 
-        admin_mi = admin_sifre == "1234"
+        admin_mi = admin_sifre == st.secrets["ADMIN_PASSWORD"]
 
         kilitli = (
             mevcut_veri not in [None, 0, 0.0, ""]
