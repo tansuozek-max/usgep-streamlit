@@ -10,6 +10,7 @@ st.set_page_config(
 
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+ADMIN_PASSWORD = st.secrets["ADMIN_PASSWORD"]
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
@@ -22,6 +23,10 @@ def sporculari_getir():
 def testleri_getir():
     data = supabase.table("testler").select("*").order("id").execute()
     return pd.DataFrame(data.data)
+
+
+def temiz_deger_mi(deger):
+    return deger not in [None, "", 0, 0.0]
 
 
 with st.sidebar:
@@ -45,6 +50,11 @@ with st.sidebar:
 
 test_modu = st.query_params.get("test", "normal")
 
+
+# ---------------------------
+# ANA SAYFA
+# ---------------------------
+
 if sayfa == "🏠 Ana Sayfa":
 
     st.title("USGEP Branş Yönlendirme Sistemi")
@@ -56,6 +66,8 @@ if sayfa == "🏠 Ana Sayfa":
     ✅ Tablet erişimi aktif  
     ✅ Streamlit Cloud yayında  
     ✅ Supabase veritabanı bağlı  
+    ✅ QR istasyon sistemi aktif  
+    ✅ Admin yetkili düzenleme aktif  
 
     ---
     """)
@@ -72,17 +84,17 @@ if sayfa == "🏠 Ana Sayfa":
         st.metric("Test Alanı", "17")
 
 
+# ---------------------------
+# SPORCU KAYIT
+# ---------------------------
+
 elif sayfa == "🧒 Sporcu Kayıt":
 
     st.title("Sporcu Kayıt")
 
-    # -------------------
-    # TEK TEK KAYIT
-    # -------------------
-
     st.subheader("Tekli Sporcu Kayıt")
 
-    with st.form("sporcu_form"):
+    with st.form("tekli_sporcu_kayit_formu"):
 
         ad = st.text_input("Ad Soyad")
         yas = st.number_input("Doğum Yılı", 2000, 2025)
@@ -92,37 +104,23 @@ elif sayfa == "🧒 Sporcu Kayıt":
         submit = st.form_submit_button("Kaydet")
 
         if submit:
-
             if not ad.strip():
-
                 st.warning("Ad soyad boş bırakılamaz.")
-
             else:
-
                 supabase.table("sporcular").insert({
-
                     "ad_soyad": ad.strip(),
                     "yas": int(yas),
                     "cinsiyet": cinsiyet,
                     "ilce": ilce.strip()
-
                 }).execute()
 
-                st.success(
-                    "Sporcu Supabase veritabanına kaydedildi."
-                )
+                st.success("Sporcu kaydedildi.")
 
     st.divider()
 
-    # -------------------
-    # TOPLU EXCEL YÜKLEME
-    # -------------------
-
     st.subheader("Excel ile Toplu Sporcu Yükleme")
 
-    st.info(
-        "Excel sütunları: ad_soyad | yas | cinsiyet | ilce"
-    )
+    st.info("Excel sütunları şu şekilde olmalı: ad_soyad | yas | cinsiyet | ilce")
 
     dosya = st.file_uploader(
         "Excel Dosyası Yükle",
@@ -132,11 +130,17 @@ elif sayfa == "🧒 Sporcu Kayıt":
     if dosya is not None:
 
         try:
-
             df = pd.read_excel(dosya)
 
+            df.columns = (
+                df.columns
+                .astype(str)
+                .str.strip()
+                .str.lower()
+            )
+
             st.write("Önizleme")
-            st.dataframe(df.head())
+            st.dataframe(df.head(), use_container_width=True)
 
             gerekli_kolonlar = [
                 "ad_soyad",
@@ -146,40 +150,42 @@ elif sayfa == "🧒 Sporcu Kayıt":
             ]
 
             eksik = [
-                kolon
-                for kolon in gerekli_kolonlar
+                kolon for kolon in gerekli_kolonlar
                 if kolon not in df.columns
             ]
 
             if eksik:
-
-                st.error(
-                    f"Eksik sütunlar: {eksik}"
-                )
+                st.error(f"Eksik sütunlar: {eksik}")
 
             else:
-
                 if st.button("Toplu Yüklemeyi Başlat"):
 
-                    veriler = df.to_dict(
-                        orient="records"
-                    )
+                    df = df[gerekli_kolonlar].copy()
 
-                    supabase.table(
-                        "sporcular"
-                    ).insert(
-                        veriler
-                    ).execute()
+                    df["ad_soyad"] = df["ad_soyad"].astype(str).str.strip()
+                    df["yas"] = df["yas"].astype(int)
+                    df["cinsiyet"] = df["cinsiyet"].astype(str).str.strip().str.upper()
+                    df["ilce"] = df["ilce"].astype(str).str.strip()
 
-                    st.success(
-                        f"{len(veriler)} sporcu başarıyla yüklendi."
-                    )
+                    df = df[df["ad_soyad"] != ""]
+
+                    veriler = df.to_dict(orient="records")
+
+                    if len(veriler) == 0:
+                        st.warning("Yüklenecek geçerli sporcu bulunamadı.")
+                    else:
+                        supabase.table("sporcular").insert(veriler).execute()
+                        st.success(f"{len(veriler)} sporcu başarıyla yüklendi.")
 
         except Exception as e:
-
             st.error(f"Hata oluştu: {e}")
-    
-    elif sayfa == "📋 Test Veri Girişi":
+
+
+# ---------------------------
+# NORMAL TEST VERİ GİRİŞİ
+# ---------------------------
+
+elif sayfa == "📋 Test Veri Girişi":
 
     st.title("Test Veri Girişi")
 
@@ -191,7 +197,6 @@ elif sayfa == "🧒 Sporcu Kayıt":
         sporcular["secim"] = sporcular["id"].astype(str) + " - " + sporcular["ad_soyad"]
 
         secili = st.selectbox("Sporcu Seç", sporcular["secim"])
-
         sporcu_id = int(secili.split(" - ")[0])
 
         st.subheader("Testler")
@@ -202,16 +207,27 @@ elif sayfa == "🧒 Sporcu Kayıt":
         dikey_sicrama = st.number_input("Dikey Sıçrama", min_value=0.0, step=0.1)
 
         if st.button("Testleri Kaydet"):
-            supabase.table("testler").insert({
+            mevcut = supabase.table("testler").select("*").eq("sporcu_id", sporcu_id).execute()
+
+            veri = {
                 "sporcu_id": sporcu_id,
                 "boy": float(boy),
                 "kilo": float(kilo),
                 "sprint20": float(sprint20),
                 "dikey_sicrama": float(dikey_sicrama)
-            }).execute()
+            }
 
-            st.success("Test verileri Supabase veritabanına kaydedildi.")
+            if mevcut.data:
+                supabase.table("testler").update(veri).eq("sporcu_id", sporcu_id).execute()
+            else:
+                supabase.table("testler").insert(veri).execute()
 
+            st.success("Test verileri kaydedildi.")
+
+
+# ---------------------------
+# SONUÇLAR
+# ---------------------------
 
 elif sayfa == "📊 Sonuçlar":
 
@@ -237,6 +253,10 @@ elif sayfa == "📊 Sonuçlar":
         st.dataframe(sonuc, use_container_width=True)
 
 
+# ---------------------------
+# DASHBOARD
+# ---------------------------
+
 elif sayfa == "📈 Dashboard":
 
     st.title("Dashboard")
@@ -257,6 +277,7 @@ elif sayfa == "📈 Dashboard":
 
     st.subheader("Test Listesi")
     st.dataframe(testler, use_container_width=True)
+
 
 # ---------------------------
 # QR / TEST İSTASYON MODU
@@ -369,6 +390,7 @@ TEST_ISTASYONLARI = {
     }
 }
 
+
 if test_modu in TEST_ISTASYONLARI:
 
     test = TEST_ISTASYONLARI[test_modu]
@@ -377,7 +399,9 @@ if test_modu in TEST_ISTASYONLARI:
 
     sporcular = sporculari_getir()
 
-    if not sporcular.empty:
+    if sporcular.empty:
+        st.warning("Henüz sporcu kaydı yok.")
+    else:
 
         sporcular["secim"] = (
             sporcular["id"].astype(str)
@@ -390,16 +414,9 @@ if test_modu in TEST_ISTASYONLARI:
             sporcular["secim"]
         )
 
-        sporcu_id = int(
-            secili.split(" - ")[0]
-        )
+        sporcu_id = int(secili.split(" - ")[0])
 
-        mevcut = supabase.table(
-            "testler"
-        ).select("*").eq(
-            "sporcu_id",
-            sporcu_id
-        ).execute()
+        mevcut = supabase.table("testler").select("*").eq("sporcu_id", sporcu_id).execute()
 
         mevcut_veri = None
 
@@ -411,18 +428,13 @@ if test_modu in TEST_ISTASYONLARI:
             type="password"
         )
 
-        admin_mi = admin_sifre == st.secrets["ADMIN_PASSWORD"]
+        admin_mi = admin_sifre == ADMIN_PASSWORD
 
-        kilitli = (
-            mevcut_veri not in [None, 0, 0.0, ""]
-            and not admin_mi
-        )
+        kilitli = temiz_deger_mi(mevcut_veri) and not admin_mi
 
         if kilitli:
 
-            st.warning(
-                "Bu test sonucu daha önce kaydedilmiş."
-            )
+            st.warning("Bu test sonucu daha önce kaydedilmiş. Düzenleme yetkiniz yok.")
 
             st.number_input(
                 f'{test["etiket"]} ({test["birim"]})',
@@ -436,18 +448,14 @@ if test_modu in TEST_ISTASYONLARI:
                 f'{test["etiket"]} ({test["birim"]})',
                 min_value=0.0,
                 step=test["step"],
-                value=float(mevcut_veri)
-                if mevcut_veri not in [None, ""]
-                else 0.0
+                value=float(mevcut_veri) if temiz_deger_mi(mevcut_veri) else 0.0
             )
 
             if st.button("Kaydet"):
 
                 if mevcut.data:
 
-                    supabase.table(
-                        "testler"
-                    ).update({
+                    supabase.table("testler").update({
                         test["kolon"]: float(sonuc)
                     }).eq(
                         "sporcu_id",
@@ -456,19 +464,10 @@ if test_modu in TEST_ISTASYONLARI:
 
                 else:
 
-                    veri = {
+                    supabase.table("testler").insert({
                         "sporcu_id": sporcu_id,
                         test["kolon"]: float(sonuc)
-                    }
+                    }).execute()
 
-                    supabase.table(
-                        "testler"
-                    ).insert(
-                        veri
-                    ).execute()
-
-                st.success(
-                    f'{test["etiket"]} kaydedildi.'
-                )
-
+                st.success(f'{test["etiket"]} kaydedildi.')
                 st.rerun()
