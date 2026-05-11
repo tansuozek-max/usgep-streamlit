@@ -72,7 +72,112 @@ if sayfa == "🏠 Ana Sayfa":
         st.metric("Test Alanı", "17")
 
 
-elif sayfa == "🧒 Sporcu Kayıt":
+    elif sayfa == "🧒 Sporcu Kayıt":
+
+    st.title("Sporcu Kayıt")
+
+    # -------------------
+    # TEK TEK KAYIT
+    # -------------------
+
+    st.subheader("Tekli Sporcu Kayıt")
+
+    with st.form("sporcu_form"):
+
+        ad = st.text_input("Ad Soyad")
+        yas = st.number_input("Yaş", 5, 18)
+        cinsiyet = st.selectbox("Cinsiyet", ["ERKEK", "KIZ"])
+        ilce = st.text_input("İlçe")
+
+        submit = st.form_submit_button("Kaydet")
+
+        if submit:
+
+            if not ad.strip():
+
+                st.warning("Ad soyad boş bırakılamaz.")
+
+            else:
+
+                supabase.table("sporcular").insert({
+
+                    "ad_soyad": ad.strip(),
+                    "yas": int(yas),
+                    "cinsiyet": cinsiyet,
+                    "ilce": ilce.strip()
+
+                }).execute()
+
+                st.success(
+                    "Sporcu Supabase veritabanına kaydedildi."
+                )
+
+    st.divider()
+
+    # -------------------
+    # TOPLU EXCEL YÜKLEME
+    # -------------------
+
+    st.subheader("Excel ile Toplu Sporcu Yükleme")
+
+    st.info(
+        "Excel sütunları: ad_soyad | yas | cinsiyet | ilce"
+    )
+
+    dosya = st.file_uploader(
+        "Excel Dosyası Yükle",
+        type=["xlsx"]
+    )
+
+    if dosya is not None:
+
+        try:
+
+            df = pd.read_excel(dosya)
+
+            st.write("Önizleme")
+            st.dataframe(df.head())
+
+            gerekli_kolonlar = [
+                "ad_soyad",
+                "yas",
+                "cinsiyet",
+                "ilce"
+            ]
+
+            eksik = [
+                kolon
+                for kolon in gerekli_kolonlar
+                if kolon not in df.columns
+            ]
+
+            if eksik:
+
+                st.error(
+                    f"Eksik sütunlar: {eksik}"
+                )
+
+            else:
+
+                if st.button("Toplu Yüklemeyi Başlat"):
+
+                    veriler = df.to_dict(
+                        orient="records"
+                    )
+
+                    supabase.table(
+                        "sporcular"
+                    ).insert(
+                        veriler
+                    ).execute()
+
+                    st.success(
+                        f"{len(veriler)} sporcu başarıyla yüklendi."
+                    )
+
+        except Exception as e:
+
+            st.error(f"Hata oluştu: {e}")
 
     st.title("Sporcu Kayıt")
 
