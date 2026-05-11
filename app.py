@@ -178,44 +178,55 @@ elif sayfa == "📈 Dashboard":
     st.dataframe(testler, use_container_width=True)
 
 # ---------------------------
-# QR TEST MODU
+# QR / TEST İSTASYON MODU
 # ---------------------------
 
-if test_modu == "sprint":
-
-    st.title("20m Sprint İstasyonu")
-
-    sporcular = sporculari_getir()
-
-    if not sporcular.empty:
-
-        sporcular["secim"] = (
-            sporcular["id"].astype(str)
-            + " - "
-            + sporcular["ad_soyad"]
-        )
-
-        secili = st.selectbox(
-            "Sporcu",
-            sporcular["secim"]
-        )
-
-        sporcu_id = int(secili.split(" - ")[0])
-
-        derece = st.number_input(
-            "20m Sprint Süresi",
-            min_value=0.0,
-            step=0.01
-        )
-
-        if st.button("Sprint Kaydet"):
-
-            supabase.table("testler").insert({
-                "sporcu_id": sporcu_id,
-                "boy": 0,
-                "kilo": 0,
-                "sprınt20": float(derece),
-                "dikey_sicrama": 0
-            }).execute()
-
-            st.success("Sprint kaydedildi.")
+TEST_ISTASYONLARI = {
+    "boy": {
+        "baslik": "Boy Ölçüm İstasyonu",
+        "kolon": "boy",
+        "etiket": "Boy",
+        "birim": "cm",
+        "step": 0.1
+    },
+    "kilo": {
+        "baslik": "Kilo Ölçüm İstasyonu",
+        "kolon": "kilo",
+        "etiket": "Kilo",
+        "birim": "kg",
+        "step": 0.1
+    },
+    "kulac": {
+        "baslik": "Kulaç Ölçüm İstasyonu",
+        "kolon": "kulac",
+        "etiket": "Kulaç",
+        "birim": "cm",
+        "step": 0.1
+    },
+    "durarak_uzun_atlama": {
+        "baslik": "Durarak Uzun Atlama İstasyonu",
+        "kolon": "durarak_uzun_atlama",
+        "etiket": "Durarak Uzun Atlama",
+        "birim": "cm",
+        "step": 0.1
+    },
+    "dikey_sicrama": {
+        "baslik": "Dikey Sıçrama İstasyonu",
+        "kolon": "dikey_sicrama",
+        "etiket": "Dikey Sıçrama",
+        "birim": "cm",
+        "step": 0.1
+    },
+    "el_kavrama": {
+        "baslik": "El Kavrama İstasyonu",
+        "kolon": "el_kavrama",
+        "etiket": "El Kavrama",
+        "birim": "kg",
+        "step": 0.1
+    },
+    "geriye_saglik_topu": {
+        "baslik": "Geriye Sağlık Topu Fırlatma İstasyonu",
+        "kolon": "geriye_saglik_topu",
+        "etiket": "Geriye Sağlık Topu Fırlatma",
+        "birim": "m",
+       
