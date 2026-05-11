@@ -313,7 +313,7 @@ if test_modu in TEST_ISTASYONLARI:
             secili.split(" - ")[0]
         )
 
-                mevcut = supabase.table(
+        mevcut = supabase.table(
             "testler"
         ).select("*").eq(
             "sporcu_id",
@@ -391,42 +391,3 @@ if test_modu in TEST_ISTASYONLARI:
                 )
 
                 st.rerun()
-
-        if st.button("Kaydet"):
-
-            mevcut = supabase.table(
-                "testler"
-            ).select("*").eq(
-                "sporcu_id",
-                sporcu_id
-            ).execute()
-
-            if mevcut.data:
-
-                supabase.table(
-                    "testler"
-                ).update({
-                    test["kolon"]: float(sonuc)
-                }).eq(
-                    "sporcu_id",
-                    sporcu_id
-                ).execute()
-
-            else:
-
-                veri = {
-                    "sporcu_id": sporcu_id,
-                    test["kolon"]: float(sonuc)
-                }
-
-                supabase.table(
-                    "testler"
-                ).insert(
-                    veri
-                ).execute()
-
-            st.success(
-                f'{test["etiket"]} kaydedildi.'
-            )
-
-
