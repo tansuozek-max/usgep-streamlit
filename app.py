@@ -85,7 +85,7 @@ if sayfa == "🏠 Ana Sayfa":
     with st.form("sporcu_form"):
 
         ad = st.text_input("Ad Soyad")
-        yas = st.number_input("Yaş", 5, 18)
+        yas = st.number_input("Doğum Yılı", 2000, 2025)
         cinsiyet = st.selectbox("Cinsiyet", ["ERKEK", "KIZ"])
         ilce = st.text_input("İlçe")
 
