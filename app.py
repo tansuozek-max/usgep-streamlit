@@ -1,18 +1,30 @@
 import streamlit as st
 import pandas as pd
 from pathlib import Path
+from supabase import create_client
 
 st.set_page_config(
     page_title="USGEP Branş Yönlendirme",
     layout="wide"
 )
 
-# ---------------------------
-# SIDEBAR
-# ---------------------------
+SUPABASE_URL = st.secrets["SUPABASE_URL"]
+SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+
+def sporculari_getir():
+    data = supabase.table("sporcular").select("*").order("id").execute()
+    return pd.DataFrame(data.data)
+
+
+def testleri_getir():
+    data = supabase.table("testler").select("*").order("id").execute()
+    return pd.DataFrame(data.data)
+
 
 with st.sidebar:
-
     logo_yolu = Path(__file__).parent / "logo.png"
 
     if logo_yolu.exists():
@@ -31,9 +43,6 @@ with st.sidebar:
         ]
     )
 
-# ---------------------------
-# ANA SAYFA
-# ---------------------------
 
 if sayfa == "🏠 Ana Sayfa":
 
@@ -45,7 +54,7 @@ if sayfa == "🏠 Ana Sayfa":
     ✅ Online erişim aktif  
     ✅ Tablet erişimi aktif  
     ✅ Streamlit Cloud yayında  
-    ✅ GitHub senkronizasyonu çalışıyor  
+    ✅ Supabase veritabanı bağlı  
 
     ---
     """)
@@ -61,155 +70,108 @@ if sayfa == "🏠 Ana Sayfa":
     with col3:
         st.metric("Test Alanı", "17")
 
-# ---------------------------
-# SPORCU KAYIT
-# ---------------------------
 
 elif sayfa == "🧒 Sporcu Kayıt":
 
     st.title("Sporcu Kayıt")
 
     with st.form("sporcu_form"):
-
         ad = st.text_input("Ad Soyad")
         yas = st.number_input("Yaş", 5, 18)
-        cinsiyet = st.selectbox(
-            "Cinsiyet",
-            ["ERKEK", "KIZ"]
-        )
-
+        cinsiyet = st.selectbox("Cinsiyet", ["ERKEK", "KIZ"])
         ilce = st.text_input("İlçe")
 
         submit = st.form_submit_button("Kaydet")
 
         if submit:
+            if not ad.strip():
+                st.warning("Ad soyad boş bırakılamaz.")
+            else:
+                supabase.table("sporcular").insert({
+                    "ad_soyad": ad.strip(),
+                    "yas": int(yas),
+                    "cinsiyet": cinsiyet,
+                    "ilce": ilce.strip()
+                }).execute()
 
-            yeni_veri = pd.DataFrame([{
-                "AD SOYAD": ad,
-                "YAŞ": yas,
-                "CİNSİYET": cinsiyet,
-                "İLÇE": ilce
-            }])
+                st.success("Sporcu Supabase veritabanına kaydedildi.")
 
-            try:
-                eski = pd.read_csv("sporcular.csv")
-                yeni = pd.concat([eski, yeni_veri], ignore_index=True)
-
-            except:
-                yeni = yeni_veri
-
-            yeni.to_csv("sporcular.csv", index=False)
-
-            st.success("Sporcu kaydedildi.")
-
-# ---------------------------
-# TEST VERİ GİRİŞİ
-# ---------------------------
 
 elif sayfa == "📋 Test Veri Girişi":
 
     st.title("Test Veri Girişi")
 
-    try:
+    sporcular = sporculari_getir()
 
-        sporcular = pd.read_csv("sporcular.csv")
+    if sporcular.empty:
+        st.warning("Önce sporcu kaydı oluşturun.")
+    else:
+        sporcular["secim"] = sporcular["id"].astype(str) + " - " + sporcular["ad_soyad"]
 
-        secili = st.selectbox(
-            "Sporcu Seç",
-            sporcular["AD SOYAD"]
-        )
+        secili = st.selectbox("Sporcu Seç", sporcular["secim"])
+
+        sporcu_id = int(secili.split(" - ")[0])
 
         st.subheader("Testler")
 
-        boy = st.number_input("Boy")
-        kilo = st.number_input("Kilo")
-        sprint = st.number_input("20m Sprint")
-        dikey = st.number_input("Dikey Sıçrama")
+        boy = st.number_input("Boy", min_value=0.0, step=0.1)
+        kilo = st.number_input("Kilo", min_value=0.0, step=0.1)
+        sprint20 = st.number_input("20m Sprint", min_value=0.0, step=0.01)
+        dikey_sicrama = st.number_input("Dikey Sıçrama", min_value=0.0, step=0.1)
 
         if st.button("Testleri Kaydet"):
+            supabase.table("testler").insert({
+                "sporcu_id": sporcu_id,
+                "boy": float(boy),
+                "kilo": float(kilo),
+                "sprint20": float(sprint20),
+                "dikey_sicrama": float(dikey_sicrama)
+            }).execute()
 
-            test_veri = pd.DataFrame([{
-                "AD SOYAD": secili,
-                "BOY": boy,
-                "KİLO": kilo,
-                "20M SPRINT": sprint,
-                "DİKEY SIÇRAMA": dikey
-            }])
+            st.success("Test verileri Supabase veritabanına kaydedildi.")
 
-            try:
-                eski = pd.read_csv("testler.csv")
-                yeni = pd.concat([eski, test_veri], ignore_index=True)
-
-            except:
-                yeni = test_veri
-
-            yeni.to_csv("testler.csv", index=False)
-
-            st.success("Test verileri kaydedildi.")
-
-    except:
-        st.warning("Önce sporcu kaydı oluşturun.")
-
-# ---------------------------
-# SONUÇLAR
-# ---------------------------
 
 elif sayfa == "📊 Sonuçlar":
 
     st.title("Sonuçlar")
 
-    try:
+    sporcular = sporculari_getir()
+    testler = testleri_getir()
 
-        testler = pd.read_csv("testler.csv")
+    if testler.empty:
+        st.info("Henüz test sonucu bulunmuyor.")
+    else:
+        if not sporcular.empty:
+            sonuc = testler.merge(
+                sporcular,
+                left_on="sporcu_id",
+                right_on="id",
+                how="left",
+                suffixes=("_test", "_sporcu")
+            )
+        else:
+            sonuc = testler
 
-        st.dataframe(
-            testler,
-            use_container_width=True
-        )
+        st.dataframe(sonuc, use_container_width=True)
 
-    except:
-        st.info("Henüz sonuç bulunmuyor.")
-
-# ---------------------------
-# DASHBOARD
-# ---------------------------
 
 elif sayfa == "📈 Dashboard":
 
     st.title("Dashboard")
 
+    sporcular = sporculari_getir()
+    testler = testleri_getir()
+
     col1, col2 = st.columns(2)
 
-    try:
+    with col1:
+        st.metric("Toplam Sporcu", len(sporcular))
 
-        sporcular = pd.read_csv("sporcular.csv")
+    with col2:
+        st.metric("Toplam Test Kaydı", len(testler))
 
-        with col1:
-            st.metric(
-                "Toplam Sporcu",
-                len(sporcular)
-            )
+    st.subheader("Sporcu Listesi")
+    st.dataframe(sporcular, use_container_width=True)
 
-    except:
-        with col1:
-            st.metric(
-                "Toplam Sporcu",
-                0
-            )
-
-    try:
-
-        testler = pd.read_csv("testler.csv")
-
-        with col2:
-            st.metric(
-                "Toplam Test",
-                len(testler)
-            )
-
-    except:
-        with col2:
-            st.metric(
-                "Toplam Test",
-                0
-            )
+    st.subheader("Test Listesi")
+    st.dataframe(testler, use_container_width=True)
