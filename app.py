@@ -43,6 +43,7 @@ with st.sidebar:
         ]
     )
 
+test_modu = st.query_params.get("test", "normal")
 
 if sayfa == "🏠 Ana Sayfa":
 
@@ -175,3 +176,43 @@ elif sayfa == "📈 Dashboard":
 
     st.subheader("Test Listesi")
     st.dataframe(testler, use_container_width=True)
+
+# ---------------------------
+# QR TEST MODU
+# ---------------------------
+
+if test_modu == "sprint":
+
+    st.title("20m Sprint İstasyonu")
+
+    sporcular = sporculari_getir()
+
+    if not sporcular.empty:
+
+        sporcular["secim"] = (
+            sporcular["id"].astype(str)
+            + " - "
+            + sporcular["ad_soyad"]
+        )
+
+        secili = st.selectbox(
+            "Sporcu",
+            sporcular["secim"]
+        )
+
+        sporcu_id = int(secili.split(" - ")[0])
+
+        derece = st.number_input(
+            "20m Sprint Süresi",
+            min_value=0.0,
+            step=0.01
+        )
+
+        if st.button("Sprint Kaydet"):
+
+            supabase.table("testler").insert({
+                "sporcu_id": sporcu_id,
+                "sprint20": derece
+            }).execute()
+
+            st.success("Sprint kaydedildi.")
