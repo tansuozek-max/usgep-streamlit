@@ -72,7 +72,7 @@ if sayfa == "🏠 Ana Sayfa":
         st.metric("Test Alanı", "17")
 
 
-    elif sayfa == "🧒 Sporcu Kayıt":
+elif sayfa == "🧒 Sporcu Kayıt":
 
     st.title("Sporcu Kayıt")
 
