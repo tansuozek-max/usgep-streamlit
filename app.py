@@ -229,4 +229,93 @@ TEST_ISTASYONLARI = {
         "kolon": "geriye_saglik_topu",
         "etiket": "Geriye Sağlık Topu Fırlatma",
         "birim": "m",
-       
+
+                "step": 0.1
+    },
+    "sprint": {
+        "baslik": "20m Sprint İstasyonu",
+        "kolon": "sprint20",
+        "etiket": "20m Sprint Süresi",
+        "birim": "sn",
+        "step": 0.01
+    },
+    "ayak_cabuklugu": {
+        "baslik": "Ayak Çabukluğu İstasyonu",
+        "kolon": "ayak_cabuklugu",
+        "etiket": "Ayak Çabukluğu",
+        "birim": "sn",
+        "step": 0.01
+    },
+    "el_cabuklugu": {
+        "baslik": "El Çabukluğu İstasyonu",
+        "kolon": "el_cabuklugu",
+        "etiket": "El Çabukluğu",
+        "birim": "adet",
+        "step": 1.0
+    },
+    "sirt_bacak": {
+        "baslik": "Sırt Bacak Kuvveti İstasyonu",
+        "kolon": "sirt_bacak",
+        "etiket": "Sırt Bacak Kuvveti",
+        "birim": "kg",
+        "step": 0.1
+    },
+    "hexagon": {
+        "baslik": "Hexagon İstasyonu",
+        "kolon": "hexagon",
+        "etiket": "Hexagon Süresi",
+        "birim": "sn",
+        "step": 0.01
+    },
+    "lane_ceviklik": {
+        "baslik": "Lane Çeviklik İstasyonu",
+        "kolon": "lane_ceviklik",
+        "etiket": "Lane Çeviklik Süresi",
+        "birim": "sn",
+        "step": 0.01
+    }
+}
+
+if test_modu in TEST_ISTASYONLARI:
+
+    test = TEST_ISTASYONLARI[test_modu]
+
+    st.title(test["baslik"])
+
+    sporcular = sporculari_getir()
+
+    if not sporcular.empty:
+
+        sporcular["secim"] = (
+            sporcular["id"].astype(str)
+            + " - "
+            + sporcular["ad_soyad"]
+        )
+
+        secili = st.selectbox(
+            "Sporcu",
+            sporcular["secim"]
+        )
+
+        sporcu_id = int(secili.split(" - ")[0])
+
+        sonuc = st.number_input(
+            f'{test["etiket"]} ({test["birim"]})',
+            min_value=0.0,
+            step=test["step"]
+        )
+
+        if st.button("Kaydet"):
+
+            veri = {
+                "sporcu_id": sporcu_id,
+                test["kolon"]: float(sonuc)
+            }
+
+            supabase.table("testler").insert(
+                veri
+            ).execute()
+
+            st.success(
+                f'{test["etiket"]} kaydedildi.'
+            )
