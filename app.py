@@ -178,32 +178,8 @@ elif sayfa == "🧒 Sporcu Kayıt":
         except Exception as e:
 
             st.error(f"Hata oluştu: {e}")
-
-    st.title("Sporcu Kayıt")
-
-    with st.form("sporcu_form"):
-        ad = st.text_input("Ad Soyad")
-        yas = st.number_input("Yaş", 5, 18)
-        cinsiyet = st.selectbox("Cinsiyet", ["ERKEK", "KIZ"])
-        ilce = st.text_input("İlçe")
-
-        submit = st.form_submit_button("Kaydet")
-
-        if submit:
-            if not ad.strip():
-                st.warning("Ad soyad boş bırakılamaz.")
-            else:
-                supabase.table("sporcular").insert({
-                    "ad_soyad": ad.strip(),
-                    "yas": int(yas),
-                    "cinsiyet": cinsiyet,
-                    "ilce": ilce.strip()
-                }).execute()
-
-                st.success("Sporcu Supabase veritabanına kaydedildi.")
-
-
-elif sayfa == "📋 Test Veri Girişi":
+    
+    elif sayfa == "📋 Test Veri Girişi":
 
     st.title("Test Veri Girişi")
 
