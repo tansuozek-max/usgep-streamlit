@@ -182,6 +182,7 @@ elif sayfa == "📈 Dashboard":
 # ---------------------------
 
 TEST_ISTASYONLARI = {
+
     "boy": {
         "baslik": "Boy Ölçüm İstasyonu",
         "kolon": "boy",
@@ -189,6 +190,7 @@ TEST_ISTASYONLARI = {
         "birim": "cm",
         "step": 0.1
     },
+
     "kilo": {
         "baslik": "Kilo Ölçüm İstasyonu",
         "kolon": "kilo",
@@ -196,6 +198,7 @@ TEST_ISTASYONLARI = {
         "birim": "kg",
         "step": 0.1
     },
+
     "kulac": {
         "baslik": "Kulaç Ölçüm İstasyonu",
         "kolon": "kulac",
@@ -203,6 +206,7 @@ TEST_ISTASYONLARI = {
         "birim": "cm",
         "step": 0.1
     },
+
     "durarak_uzun_atlama": {
         "baslik": "Durarak Uzun Atlama İstasyonu",
         "kolon": "durarak_uzun_atlama",
@@ -210,6 +214,7 @@ TEST_ISTASYONLARI = {
         "birim": "cm",
         "step": 0.1
     },
+
     "dikey_sicrama": {
         "baslik": "Dikey Sıçrama İstasyonu",
         "kolon": "dikey_sicrama",
@@ -217,6 +222,7 @@ TEST_ISTASYONLARI = {
         "birim": "cm",
         "step": 0.1
     },
+
     "el_kavrama": {
         "baslik": "El Kavrama İstasyonu",
         "kolon": "el_kavrama",
@@ -224,21 +230,23 @@ TEST_ISTASYONLARI = {
         "birim": "kg",
         "step": 0.1
     },
-    "geriye_saglik_topu": {
-        "baslik": "Geriye Sağlık Topu Fırlatma İstasyonu",
-        "kolon": "geriye_saglik_topu",
-        "etiket": "Geriye Sağlık Topu Fırlatma",
-        "birim": "m",
 
-                "step": 0.1
+    "geriye_saglik_topu": {
+        "baslik": "Geriye Sağlık Topu İstasyonu",
+        "kolon": "geriye_saglik_topu",
+        "etiket": "Geriye Sağlık Topu",
+        "birim": "m",
+        "step": 0.1
     },
+
     "sprint": {
         "baslik": "20m Sprint İstasyonu",
         "kolon": "sprint20",
-        "etiket": "20m Sprint Süresi",
+        "etiket": "20m Sprint",
         "birim": "sn",
         "step": 0.01
     },
+
     "ayak_cabuklugu": {
         "baslik": "Ayak Çabukluğu İstasyonu",
         "kolon": "ayak_cabuklugu",
@@ -246,6 +254,7 @@ TEST_ISTASYONLARI = {
         "birim": "sn",
         "step": 0.01
     },
+
     "el_cabuklugu": {
         "baslik": "El Çabukluğu İstasyonu",
         "kolon": "el_cabuklugu",
@@ -253,6 +262,7 @@ TEST_ISTASYONLARI = {
         "birim": "adet",
         "step": 1.0
     },
+
     "sirt_bacak": {
         "baslik": "Sırt Bacak Kuvveti İstasyonu",
         "kolon": "sirt_bacak",
@@ -260,17 +270,19 @@ TEST_ISTASYONLARI = {
         "birim": "kg",
         "step": 0.1
     },
+
     "hexagon": {
         "baslik": "Hexagon İstasyonu",
         "kolon": "hexagon",
-        "etiket": "Hexagon Süresi",
+        "etiket": "Hexagon",
         "birim": "sn",
         "step": 0.01
     },
+
     "lane_ceviklik": {
         "baslik": "Lane Çeviklik İstasyonu",
         "kolon": "lane_ceviklik",
-        "etiket": "Lane Çeviklik Süresi",
+        "etiket": "Lane Çeviklik",
         "birim": "sn",
         "step": 0.01
     }
@@ -297,7 +309,9 @@ if test_modu in TEST_ISTASYONLARI:
             sporcular["secim"]
         )
 
-        sporcu_id = int(secili.split(" - ")[0])
+        sporcu_id = int(
+            secili.split(" - ")[0]
+        )
 
         sonuc = st.number_input(
             f'{test["etiket"]} ({test["birim"]})',
@@ -307,15 +321,39 @@ if test_modu in TEST_ISTASYONLARI:
 
         if st.button("Kaydet"):
 
-            veri = {
-                "sporcu_id": sporcu_id,
-                test["kolon"]: float(sonuc)
-            }
-
-            supabase.table("testler").insert(
-                veri
+            mevcut = supabase.table(
+                "testler"
+            ).select("*").eq(
+                "sporcu_id",
+                sporcu_id
             ).execute()
+
+            if mevcut.data:
+
+                supabase.table(
+                    "testler"
+                ).update({
+                    test["kolon"]: float(sonuc)
+                }).eq(
+                    "sporcu_id",
+                    sporcu_id
+                ).execute()
+
+            else:
+
+                veri = {
+                    "sporcu_id": sporcu_id,
+                    test["kolon"]: float(sonuc)
+                }
+
+                supabase.table(
+                    "testler"
+                ).insert(
+                    veri
+                ).execute()
 
             st.success(
                 f'{test["etiket"]} kaydedildi.'
             )
+
+
