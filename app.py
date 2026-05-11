@@ -208,12 +208,16 @@ if test_modu == "sprint":
             step=0.01
         )
 
-        if st.button("Sprint Kaydet"):
+if st.button("Sprint Kaydet"):
 
-supabase.table("testler").insert({
-    "sporcu_id": sporcu_id,
-    "boy": 0,
-    "kilo": 0,
-    "sprint20": float(derece),
-    "dikey_sicrama": 0
-}).execute()
+    supabase.table("testler").insert({
+        "sporcu_id": sporcu_id,
+        "boy": 0,
+        "kilo": 0,
+        "sprint20": float(derece),
+        "dikey_sicrama": 0
+    }).execute()
+
+    st.success("Sprint kaydedildi.")
+
+
