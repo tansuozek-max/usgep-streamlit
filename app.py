@@ -313,11 +313,84 @@ if test_modu in TEST_ISTASYONLARI:
             secili.split(" - ")[0]
         )
 
-        sonuc = st.number_input(
-            f'{test["etiket"]} ({test["birim"]})',
-            min_value=0.0,
-            step=test["step"]
+                mevcut = supabase.table(
+            "testler"
+        ).select("*").eq(
+            "sporcu_id",
+            sporcu_id
+        ).execute()
+
+        mevcut_veri = None
+
+        if mevcut.data:
+            mevcut_veri = mevcut.data[0].get(test["kolon"])
+
+        admin_sifre = st.sidebar.text_input(
+            "Admin Şifresi",
+            type="password"
         )
+
+        admin_mi = admin_sifre == "1234"
+
+        kilitli = (
+            mevcut_veri not in [None, 0, 0.0, ""]
+            and not admin_mi
+        )
+
+        if kilitli:
+
+            st.warning(
+                "Bu test sonucu daha önce kaydedilmiş."
+            )
+
+            st.number_input(
+                f'{test["etiket"]} ({test["birim"]})',
+                value=float(mevcut_veri),
+                disabled=True
+            )
+
+        else:
+
+            sonuc = st.number_input(
+                f'{test["etiket"]} ({test["birim"]})',
+                min_value=0.0,
+                step=test["step"],
+                value=float(mevcut_veri)
+                if mevcut_veri not in [None, ""]
+                else 0.0
+            )
+
+            if st.button("Kaydet"):
+
+                if mevcut.data:
+
+                    supabase.table(
+                        "testler"
+                    ).update({
+                        test["kolon"]: float(sonuc)
+                    }).eq(
+                        "sporcu_id",
+                        sporcu_id
+                    ).execute()
+
+                else:
+
+                    veri = {
+                        "sporcu_id": sporcu_id,
+                        test["kolon"]: float(sonuc)
+                    }
+
+                    supabase.table(
+                        "testler"
+                    ).insert(
+                        veri
+                    ).execute()
+
+                st.success(
+                    f'{test["etiket"]} kaydedildi.'
+                )
+
+                st.rerun()
 
         if st.button("Kaydet"):
 
