@@ -591,45 +591,58 @@ def brans_supabase_ham_verisi(sporcular, testler):
 
 
 ON_TEST_RENKLER = {
-    4: "FF0000",
-    8: "FFC000",
-    12: "5B9BD5",
-    16: "A9D08E",
-    20: "00B050",
+    "ÇOK ALTI": "FF0000",
+    "ALTI": "FFC000",
+    "ORTALAMA": "5B9BD5",
+    "ÜSTÜ": "A9D08E",
+    "ÇOK ÜSTÜ": "00B050",
 }
 
 ON_TEST_PUANLARI = {
-    "ÇOK ALTI": 4,
-    "ALTI": 8,
-    "ORTALAMA": 12,
-    "ÜSTÜ": 16,
-    "ÇOK ÜSTÜ": 20,
+    "ÇOK ALTI": 5,
+    "ALTI": 10,
+    "ORTALAMA": 15,
+    "ÜSTÜ": 20,
+    "ÇOK ÜSTÜ": 25,
+}
+
+ON_TEST_BARAJLARI = {
+    7: 50,
+    8: 60,
+    9: 70,
+    10: 70,
 }
 
 ON_TESTLER = {
     "BOY": {
         "sayfa": "BOY",
         "adaylar": ["BOY"],
+        "puanlanir": False,
     },
     "KULAÇ": {
         "sayfa": "KULAÇ",
         "adaylar": ["KULAÇ", "KULAC"],
+        "puanlanir": False,
     },
     "OTUR UZAN": {
         "sayfa": "OTUR UZAN",
         "adaylar": ["OTUR UZAN", "ESNEKLİK", "ESNEKLIK"],
+        "puanlanir": True,
     },
     "DURARAK UZUN ATLAMA": {
         "sayfa": "DURARAK UZUN ATLAMA",
         "adaylar": ["DURARAK UZUN ATLAMA", "UZUN ATLAMA"],
+        "puanlanir": True,
     },
     "MEKİK": {
         "sayfa": "MEKİK",
         "adaylar": ["MEKİK", "MEKIK"],
+        "puanlanir": True,
     },
     "20 M. SPRINT": {
         "sayfa": "20 M. SPRINT",
         "adaylar": ["20 M. SPRINT", "20M SPRINT", "20 M SPRINT", "SPRINT"],
+        "puanlanir": True,
     },
 }
 
@@ -731,23 +744,24 @@ def on_test_yas_hesapla(ham):
     dogum_tarihi_col = on_test_kolon_bul(ham, ["DOĞUM TARİHİ", "DOGUM TARIHI"])
     dogum_yili_col = on_test_kolon_bul(ham, ["DOĞUM YILI", "DOGUM YILI"])
     yas_col = on_test_kolon_bul(ham, ["YAŞ", "YAS"])
+    bu_yil = pd.Timestamp.now().year
+    yas = None
 
     if dogum_tarihi_col:
-        ham["ÖN TEST YAŞ"] = (
-            pd.Timestamp.now().year
-            - pd.to_datetime(ham[dogum_tarihi_col], errors="coerce").dt.year
-        )
-    elif dogum_yili_col:
-        ham["ÖN TEST YAŞ"] = (
-            pd.Timestamp.now().year
-            - pd.to_numeric(ham[dogum_yili_col], errors="coerce")
-        )
-    elif yas_col:
-        ham["ÖN TEST YAŞ"] = pd.to_numeric(ham[yas_col], errors="coerce")
-    else:
-        ham["ÖN TEST YAŞ"] = 0
+        yas = bu_yil - pd.to_datetime(ham[dogum_tarihi_col], errors="coerce").dt.year
 
-    ham["ÖN TEST YAŞ"] = ham["ÖN TEST YAŞ"].fillna(0).astype(int)
+    if dogum_yili_col:
+        dogum_yili_yasi = bu_yil - pd.to_numeric(ham[dogum_yili_col], errors="coerce")
+        yas = dogum_yili_yasi if yas is None else yas.fillna(dogum_yili_yasi)
+
+    if yas_col:
+        hazir_yas = pd.to_numeric(ham[yas_col], errors="coerce")
+        yas = hazir_yas if yas is None else yas.fillna(hazir_yas)
+
+    if yas is None:
+        yas = pd.Series([0] * len(ham), index=ham.index)
+
+    ham["YAŞ"] = yas.fillna(0).astype(int)
     return ham
 
 
@@ -766,40 +780,36 @@ def on_test_veriyi_standartlastir(ham):
     return ham
 
 
-def on_test_norm_puanla(deger, norm_satiri):
+def on_test_norm_seviye_bul(deger, norm_satiri):
     if pd.isna(deger) or on_test_temizle_metin(deger) in ["VERİ YOK", "VERI YOK", "NAN", ""]:
-        return 4
+        return "ÇOK ALTI"
 
     try:
         deger = on_test_sayiya_cevir(deger)
     except Exception:
-        return 4
+        return "ÇOK ALTI"
 
-    for kolon, puan in ON_TEST_PUANLARI.items():
+    for kolon in ON_TEST_PUANLARI:
         if kolon in norm_satiri and on_test_aralik_uyuyor_mu(deger, norm_satiri[kolon]):
-            return puan
+            return kolon
 
-    return 4
+    return "ÇOK ALTI"
 
 
 def on_test_kriter_hesapla(ham, puan_sutunlari):
-    ham["ÖN TEST TOPLAM PUAN"] = ham[puan_sutunlari].sum(axis=1)
-    ham["ÖN TEST ORTALAMA PUAN"] = ham[puan_sutunlari].mean(axis=1).round(2)
+    ham["TOPLAM ÖN TEST PUANI"] = ham[puan_sutunlari].sum(axis=1)
 
-    seviyeler = []
-    for ortalama in ham["ÖN TEST ORTALAMA PUAN"]:
-        if ortalama >= 20:
-            seviyeler.append("ÇOK ÜSTÜ")
-        elif ortalama >= 16:
-            seviyeler.append("ÜSTÜ")
-        elif ortalama >= 12:
-            seviyeler.append("ORTALAMA")
-        elif ortalama >= 8:
-            seviyeler.append("ALTI")
+    durumlar = []
+    for _, row in ham.iterrows():
+        yas = int(row["YAŞ"]) if pd.notna(row["YAŞ"]) else 0
+        baraj = ON_TEST_BARAJLARI.get(yas)
+
+        if baraj is not None and row["TOPLAM ÖN TEST PUANI"] >= baraj:
+            durumlar.append("ÇAĞRILACAK")
         else:
-            seviyeler.append("ÇOK ALTI")
+            durumlar.append("ÇAĞRILMAYACAK")
 
-    ham["ÖN TEST GENEL SEVİYE"] = seviyeler
+    ham["EUROFIT DURUMU"] = durumlar
     return ham
 
 
@@ -813,20 +823,26 @@ def on_test_degerlendir(ham, norm_dosya):
     puan_sutunlari = []
 
     for test, bilgi in ON_TESTLER.items():
-        puan_sutunu = f"{test} ÖN TEST PUAN"
-        puan_sutunlari.append(puan_sutunu)
+        seviye_sutunu = f"{test} SEVİYE"
+        puan_sutunu = f"{test} PUAN"
+
+        if bilgi["puanlanir"]:
+            puan_sutunlari.append(puan_sutunu)
 
         if test not in ham.columns:
             ham[test] = "VERİ YOK"
-            ham[puan_sutunu] = 4
+            ham[seviye_sutunu] = "ÇOK ALTI"
+            if bilgi["puanlanir"]:
+                ham[puan_sutunu] = ON_TEST_PUANLARI["ÇOK ALTI"]
             continue
 
         norm = on_test_sheet_oku(norm_dosya, bilgi["sayfa"])
+        seviyeler = []
         puanlar = []
 
         for _, row in ham.iterrows():
             cinsiyet = on_test_temizle_metin(row["CİNSİYET"])
-            yas = row["ÖN TEST YAŞ"]
+            yas = row["YAŞ"]
 
             norm_satirlari = norm[
                 (norm["CİNSİYET"].astype(str).str.upper().str.strip() == cinsiyet)
@@ -834,11 +850,18 @@ def on_test_degerlendir(ham, norm_dosya):
             ]
 
             if norm_satirlari.empty:
-                puanlar.append(4)
+                seviye = "ÇOK ALTI"
             else:
-                puanlar.append(on_test_norm_puanla(row[test], norm_satirlari.iloc[0]))
+                seviye = on_test_norm_seviye_bul(row[test], norm_satirlari.iloc[0])
 
-        ham[puan_sutunu] = puanlar
+            seviyeler.append(seviye)
+
+            if bilgi["puanlanir"]:
+                puanlar.append(ON_TEST_PUANLARI[seviye])
+
+        ham[seviye_sutunu] = seviyeler
+        if bilgi["puanlanir"]:
+            ham[puan_sutunu] = puanlar
 
     ham = on_test_kriter_hesapla(ham, puan_sutunlari)
     return ham
@@ -850,24 +873,28 @@ def on_test_excel_olustur(ham):
         "AD SOYAD",
         "OKUL",
         "İLÇE",
+        "DOĞUM\nTARİHİ",
         "DOĞUM\nYILI",
         "CİNSİYET",
-        "ÖN TEST YAŞ",
+        "YAŞ",
     ]
 
     test_sutunlari = []
-    for test in ON_TESTLER:
+    for test, bilgi in ON_TESTLER.items():
         if test in ham.columns:
             test_sutunlari.append(test)
 
-        puan_sutunu = f"{test} ÖN TEST PUAN"
-        if puan_sutunu in ham.columns:
+        seviye_sutunu = f"{test} SEVİYE"
+        if seviye_sutunu in ham.columns:
+            test_sutunlari.append(seviye_sutunu)
+
+        puan_sutunu = f"{test} PUAN"
+        if bilgi["puanlanir"] and puan_sutunu in ham.columns:
             test_sutunlari.append(puan_sutunu)
 
     sonuc_sutunlari = [
-        "ÖN TEST TOPLAM PUAN",
-        "ÖN TEST ORTALAMA PUAN",
-        "ÖN TEST GENEL SEVİYE",
+        "TOPLAM ÖN TEST PUANI",
+        "EUROFIT DURUMU",
     ]
 
     kolonlar = [
@@ -885,20 +912,34 @@ def on_test_excel_olustur(ham):
     ws = wb.active
     basliklar = [cell.value for cell in ws[1]]
 
-    for baslik in basliklar:
-        if not baslik or "ÖN TEST PUAN" not in str(baslik):
+    for test in ON_TESTLER:
+        seviye_sutunu = f"{test} SEVİYE"
+
+        if seviye_sutunu not in basliklar:
             continue
 
-        col_no = basliklar.index(baslik) + 1
+        seviye_col_no = basliklar.index(seviye_sutunu) + 1
+        renklenecek_kolonlar = [seviye_col_no]
+
+        if test in basliklar:
+            renklenecek_kolonlar.append(basliklar.index(test) + 1)
+
+        puan_sutunu = f"{test} PUAN"
+        if puan_sutunu in basliklar:
+            renklenecek_kolonlar.append(basliklar.index(puan_sutunu) + 1)
+
         for row_no in range(2, ws.max_row + 1):
-            puan = ws.cell(row=row_no, column=col_no).value
-            if puan in ON_TEST_RENKLER:
+            seviye = ws.cell(row=row_no, column=seviye_col_no).value
+
+            if seviye in ON_TEST_RENKLER:
                 fill = PatternFill(
-                    start_color=ON_TEST_RENKLER[puan],
-                    end_color=ON_TEST_RENKLER[puan],
+                    start_color=ON_TEST_RENKLER[seviye],
+                    end_color=ON_TEST_RENKLER[seviye],
                     fill_type="solid",
                 )
-                ws.cell(row=row_no, column=col_no).fill = fill
+
+                for col_no in renklenecek_kolonlar:
+                    ws.cell(row=row_no, column=col_no).fill = fill
 
     ince_kenar = Side(style="thin", color="000000")
     tam_kenarlik = Border(
@@ -1211,24 +1252,17 @@ elif sayfa == "🧪 Ön Testler":
         )
 
     with col2:
-        on_test_norm_dosyasi = on_test_norm_dosyasi_bul()
         on_test_yuklenen_norm = st.file_uploader(
-            "Ön test norm/kriter Excel dosyasını yükle",
+            "Ön test norm Excel dosyasını yükle",
             type=["xlsx"],
             key="on_test_norm_dosya",
-            help="NORM TABLO ÖN TESTLER.xlsx bulunamazsa buradan yükleyebilirsiniz.",
+            help="TEST | CİNSİYET | YAŞ | ÇOK ALTI | ALTI | ORTALAMA | ÜSTÜ | ÇOK ÜSTÜ yapısında olmalı.",
         )
-
-    on_test_norm_kaynak = (
-        on_test_yuklenen_norm
-        if on_test_yuklenen_norm is not None
-        else on_test_norm_dosyasi
-    )
 
     if on_test_ham_dosya is None:
         st.warning("Ön Testler için ham Excel dosyasını yükleyin.")
-    elif on_test_norm_kaynak is None:
-        st.error("Ön Testler norm/kriter dosyası bulunamadı. Lütfen ayrı Ön Test norm dosyasını yükleyin.")
+    elif on_test_yuklenen_norm is None:
+        st.warning("Ön Testler için norm Excel dosyasını yükleyin.")
     else:
         try:
             on_test_ham = pd.read_excel(on_test_ham_dosya)
@@ -1250,32 +1284,71 @@ elif sayfa == "🧪 Ön Testler":
             if st.button("Ön Testleri Değerlendir"):
                 on_test_sonuc = on_test_degerlendir(
                     on_test_ham.copy(),
-                    on_test_norm_kaynak,
+                    on_test_yuklenen_norm,
                 )
+
+                cagrilacak = on_test_sonuc[
+                    on_test_sonuc["EUROFIT DURUMU"] == "ÇAĞRILACAK"
+                ].copy()
+                cagrilmayacak_sayi = len(on_test_sonuc) - len(cagrilacak)
+
+                ozet1, ozet2, ozet3 = st.columns(3)
+
+                with ozet1:
+                    st.metric("Toplam Öğrenci", len(on_test_sonuc))
+
+                with ozet2:
+                    st.metric("Çağrılacak Öğrenci", len(cagrilacak))
+
+                with ozet3:
+                    st.metric("Çağrılmayacak Öğrenci", cagrilmayacak_sayi)
 
                 st.subheader("Ön Test Sonuç Önizleme")
 
                 on_test_onizleme = [
+                    "S.N.",
                     "AD SOYAD",
-                    "ÖN TEST TOPLAM PUAN",
-                    "ÖN TEST ORTALAMA PUAN",
-                    "ÖN TEST GENEL SEVİYE",
+                    "YAŞ",
+                    "BOY SEVİYE",
+                    "KULAÇ SEVİYE",
+                    "OTUR UZAN SEVİYE",
+                    "OTUR UZAN PUAN",
+                    "DURARAK UZUN ATLAMA SEVİYE",
+                    "DURARAK UZUN ATLAMA PUAN",
+                    "MEKİK SEVİYE",
+                    "MEKİK PUAN",
+                    "20 M. SPRINT SEVİYE",
+                    "20 M. SPRINT PUAN",
+                    "TOPLAM ÖN TEST PUANI",
+                    "EUROFIT DURUMU",
                 ]
 
                 st.dataframe(
-                    on_test_sonuc[[c for c in on_test_onizleme if c in on_test_sonuc.columns]].head(30),
+                    on_test_sonuc[[c for c in on_test_onizleme if c in on_test_sonuc.columns]],
                     use_container_width=True,
                     hide_index=True,
                 )
 
-                on_test_excel = on_test_excel_olustur(on_test_sonuc)
+                on_test_excel_tumu = on_test_excel_olustur(on_test_sonuc)
+                on_test_excel_cagrilacak = on_test_excel_olustur(cagrilacak)
 
-                st.download_button(
-                    label="Ön Test Sonuç Excel Dosyasını İndir",
-                    data=on_test_excel,
-                    file_name="USGEP_ON_TEST_SONUCLAR.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                )
+                indirme1, indirme2 = st.columns(2)
+
+                with indirme1:
+                    st.download_button(
+                        label="Tüm Öğrenciler Excel",
+                        data=on_test_excel_tumu,
+                        file_name="USGEP_ON_TEST_TUM_OGRENCILER.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
+
+                with indirme2:
+                    st.download_button(
+                        label="Eurofit'e Çağrılacaklar Excel",
+                        data=on_test_excel_cagrilacak,
+                        file_name="USGEP_ON_TEST_EUROFIT_CAGRILACAKLAR.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
 
         except Exception as e:
             st.error(f"Ön Test değerlendirmesi oluşturulamadı: {e}")
