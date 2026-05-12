@@ -1,5 +1,8 @@
 import streamlit as st
 import pandas as pd
+import re
+from datetime import date
+from io import BytesIO
 from pathlib import Path
 from supabase import create_client
 
@@ -27,84 +30,247 @@ def testleri_getir():
 
 def temiz_deger_mi(deger):
     return deger not in [None, "", 0, 0.0]
-def yas_hesapla(yas_degeri):
-    yas_degeri = int(yas_degeri)
-
-    if yas_degeri > 1000:
-        return 2026 - yas_degeri
-
-    return yas_degeri
 
 
-def sayiya_cevir(deger):
+BRANS_TESTLERI = [
+    ("BOY", "boy", "BOY"),
+    ("KİLO", "kilo", "KİLO"),
+    ("KULAÇ", "kulac", "KULAÇ"),
+    ("EL ÇABUKLUĞU", "el_cabuklugu", "EL ÇABUKLUĞU"),
+    ("AYAK ÇABUKLUĞU", "ayak_cabuklugu", "AYAK ÇABUKLUĞU"),
+    ("EL KAVRAMA", "el_kavrama", "EL KAVRAMA"),
+    ("SIRT BACAK", "sirt_bacak", "SIRT BACAK KUVVETİ"),
+    ("HEXAGON", "hexagon", "HEXAGON"),
+    ("DURARAK UZUN ATLAMA", "durarak_uzun_atlama", "DURARAK UZUN ATLAMA"),
+    ("GERİYE SAĞLIK TOPU ATMA", "geriye_saglik_topu", "GERİYE SAĞLIK TOPU FIRLATMA"),
+    ("DİKEY SIÇRAMA", "dikey_sicrama", "DİKEY SIÇRAMA"),
+    ("LANE AGILITY", "lane_ceviklik", "LANE ÇEVİKLİK"),
+    ("20 M. SPRINT", "sprint20", "20 M. SPRINT"),
+]
+
+NORM_PUANLARI = {
+    "ÇOK ALTI": 4,
+    "ALTI": 8,
+    "ORTALAMA": 12,
+    "ÜSTÜ": 16,
+    "ÇOK ÜSTÜ": 20,
+}
+
+
+def _metin_norm(metin):
+    return str(metin).strip().upper().replace("İ", "I")
+
+
+def _sayi_yap(deger):
     if pd.isna(deger):
         return None
-
-    return float(str(deger).replace(",", ".").strip())
-
-
-def norm_puani_bul(norm_df, test_adi, cinsiyet, yas, sonuc):
-    if sonuc in [None, "", 0, 0.0] or pd.isna(sonuc):
+    if isinstance(deger, (int, float)):
+        return float(deger)
+    temiz = str(deger).strip().replace(",", ".")
+    try:
+        return float(temiz)
+    except ValueError:
         return None
 
-    yas = yas_hesapla(yas)
-    cinsiyet = str(cinsiyet).strip().upper()
 
-    satirlar = norm_df[
-        (norm_df["CİNSİYET"].astype(str).str.upper() == cinsiyet)
-        & (norm_df["YAŞ"].astype(int) == yas)
+def _yas_hesapla(deger):
+    yas = _sayi_yap(deger)
+    if yas is None:
+        return None
+    yas = int(yas)
+    if yas > 1900:
+        return date.today().year - yas
+    return yas
+
+
+def _norm_dosyasi_bul():
+    adaylar = [
+        Path(__file__).parent / "NORM TABLO.xlsx",
+        Path(__file__).parent / "NORM TABLO(5).xlsx",
+        Path.home() / "Desktop" / "NORM TABLO.xlsx",
+        Path.home() / "Desktop" / "NORM TABLO(5).xlsx",
+    ]
+    for yol in adaylar:
+        if yol.exists():
+            return yol
+    return None
+
+
+def _normlari_oku(kaynak):
+    sayfalar = pd.read_excel(kaynak, sheet_name=None, engine="openpyxl")
+    return {str(ad).strip().upper(): df for ad, df in sayfalar.items()}
+
+
+def _aralik_uyuyor_mu(ifade, deger):
+    if pd.isna(ifade) or deger is None:
+        return False
+
+    metin = str(ifade).strip().replace(",", ".")
+    sayilar = [float(s) for s in re.findall(r"\d+(?:\.\d+)?", metin)]
+
+    if not sayilar:
+        return False
+
+    if "≤" in metin or "<=" in metin:
+        return deger <= sayilar[0]
+
+    if "≥" in metin or ">=" in metin:
+        return deger >= sayilar[0]
+
+    if len(sayilar) >= 2:
+        alt = min(sayilar[0], sayilar[1])
+        ust = max(sayilar[0], sayilar[1])
+        return alt <= deger <= ust
+
+    return deger == sayilar[0]
+
+
+def _norm_puani(normlar, sayfa_adi, cinsiyet, yas, deger):
+    deger = _sayi_yap(deger)
+    yas = _yas_hesapla(yas)
+
+    if deger is None or yas is None or not cinsiyet:
+        return None
+
+    df = normlar.get(sayfa_adi.strip().upper())
+    if df is None:
+        return None
+
+    df = df.copy()
+    df.columns = [str(k).strip().upper() for k in df.columns]
+
+    if "CİNSİYET" not in df.columns or "YAŞ" not in df.columns:
+        return None
+
+    satirlar = df[
+        (df["CİNSİYET"].map(_metin_norm) == _metin_norm(cinsiyet))
+        & (pd.to_numeric(df["YAŞ"], errors="coerce") == yas)
     ]
 
     if satirlar.empty:
         return None
 
     satir = satirlar.iloc[0]
-
-    kategoriler = {
-        "ÇOK ALTI": 1,
-        "ALTI": 2,
-        "ORTALAMA": 3,
-        "ÜSTÜ": 4,
-        "ÇOK ÜSTÜ": 5
-    }
-
-    sonuc = float(sonuc)
-
-    for kategori, puan in kategoriler.items():
-        aralik = str(satir[kategori]).replace(",", ".").strip()
-        aralik = aralik.replace(",", ".")
-
-        if "≤" in aralik:
-            limit = sayiya_cevir(aralik.replace("≤", ""))
-            if sonuc <= limit:
-                return puan
-
-        elif "≥" in aralik:
-            limit = sayiya_cevir(aralik.replace("≥", ""))
-            if sonuc >= limit:
-                return puan
-
-        elif "-" in aralik:
-
-            aralik = aralik.replace(" ", "")
-            parcalar = aralik.split("-")
-
-            if len(parcalar) != 2:
-                continue
-
-            a = sayiya_cevir(parcalar[0])
-            b = sayiya_cevir(parcalar[1])
-
-            if a is None or b is None:
-                continue
-
-            alt = min(a, b)
-            ust = max(a, b)
-
-            if alt <= sonuc <= ust:
-                return puan
+    for kolon, puan in NORM_PUANLARI.items():
+        if kolon in satir and _aralik_uyuyor_mu(satir[kolon], deger):
+            return puan
 
     return None
+
+
+def _ilk_dolu_satir_degeri(satir, kolonlar):
+    for kolon in kolonlar:
+        if kolon in satir and pd.notna(satir[kolon]):
+            return satir[kolon]
+    return None
+
+
+def brans_amacli_sonuclari_hazirla(sporcular, testler, normlar):
+    birlesik = testler.merge(
+        sporcular,
+        left_on="sporcu_id",
+        right_on="id",
+        how="left",
+        suffixes=("_test", "_sporcu"),
+    )
+
+    satirlar = []
+
+    for sira, (_, satir) in enumerate(birlesik.iterrows(), start=1):
+        yas_degeri = _ilk_dolu_satir_degeri(
+            satir,
+            ["yas", "yas_sporcu", "doğum_yılı", "dogum_yili", "dogum_yılı", "dogum_yili_sporcu"],
+        )
+        cinsiyet = _ilk_dolu_satir_degeri(satir, ["cinsiyet", "cinsiyet_sporcu", "cinsiyet_test"])
+
+        sonuc = {
+            "S.N.": sira,
+            "İLÇE": _ilk_dolu_satir_degeri(satir, ["ilce", "ilçe"]),
+            "AD SOYAD": _ilk_dolu_satir_degeri(satir, ["ad_soyad", "ad soyad"]),
+            "DOĞUM YILI": yas_degeri,
+            "YAŞ": _yas_hesapla(yas_degeri),
+            "CİNSİYET": cinsiyet,
+        }
+
+        puan_kolonlari = []
+
+        for baslik, veri_kolonu, norm_sayfasi in BRANS_TESTLERI:
+            deger = satir[veri_kolonu] if veri_kolonu in satir else None
+            puan = _norm_puani(normlar, norm_sayfasi, cinsiyet, yas_degeri, deger)
+            puan_kolon = f"{baslik} PUAN"
+
+            sonuc[baslik] = deger
+            sonuc[puan_kolon] = puan
+            puan_kolonlari.append(puan_kolon)
+
+        sonuc["TOPLAM PUAN"] = sum(sonuc[k] for k in puan_kolonlari if sonuc[k] is not None)
+        satirlar.append(sonuc)
+
+    return pd.DataFrame(satirlar)
+
+
+def _puan_renk_css(deger):
+    renkler = {
+        4: "background-color: #f4cccc;",
+        8: "background-color: #fce5cd;",
+        12: "background-color: #fff2cc;",
+        16: "background-color: #d9ead3;",
+        20: "background-color: #b6d7a8;",
+    }
+    return renkler.get(deger, "")
+
+
+def brans_excel_olustur(df):
+    from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
+
+    cikti = BytesIO()
+
+    with pd.ExcelWriter(cikti, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Branş Amaçlı")
+        ws = writer.sheets["Branş Amaçlı"]
+
+        header_fill = PatternFill("solid", fgColor="D9EAF7")
+        total_fill = PatternFill("solid", fgColor="B4C6E7")
+        fills = {
+            4: PatternFill("solid", fgColor="F4CCCC"),
+            8: PatternFill("solid", fgColor="FCE5CD"),
+            12: PatternFill("solid", fgColor="FFF2CC"),
+            16: PatternFill("solid", fgColor="D9EAD3"),
+            20: PatternFill("solid", fgColor="B6D7A8"),
+        }
+        ince = Side(style="thin", color="D9D9D9")
+        kenarlik = Border(left=ince, right=ince, top=ince, bottom=ince)
+
+        ws.freeze_panes = "A2"
+        ws.auto_filter.ref = ws.dimensions
+
+        for cell in ws[1]:
+            cell.fill = header_fill
+            cell.font = Font(bold=True)
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            cell.border = kenarlik
+
+        for row in ws.iter_rows(min_row=2):
+            for cell in row:
+                baslik = ws.cell(1, cell.column).value
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+                cell.border = kenarlik
+
+                if baslik and "PUAN" in str(baslik):
+                    cell.fill = fills.get(cell.value, PatternFill(fill_type=None))
+
+                if baslik == "TOPLAM PUAN":
+                    cell.fill = total_fill
+                    cell.font = Font(bold=True)
+
+        for col in ws.columns:
+            baslik = str(col[0].value or "")
+            genislik = min(max(len(baslik) + 2, 10), 28)
+            ws.column_dimensions[col[0].column_letter].width = genislik
+
+    cikti.seek(0)
+    return cikti.getvalue()
+
 
 SAYFALAR = [
     "🏠 Ana Sayfa",
@@ -364,111 +530,16 @@ elif sayfa == "🧪 Ön Testler":
 
     st.title("Ön Testler")
 
+    st.info("Bu sayfada ön test sonuçları, puanlama ve Excel çıktı işlemleri yapılacak.")
+
     sporcular = sporculari_getir()
     testler = testleri_getir()
 
-    norm_dosya = Path(__file__).parent / "NORM TABLO ÖN TESTLER.xlsx"
+    st.subheader("Sporcu Verileri")
+    st.dataframe(sporcular, use_container_width=True)
 
-    if not norm_dosya.exists():
-
-        st.error("Norm dosyası bulunamadı. GitHub'a 'NORM TABLO ÖN TESTLER.xlsx' dosyasını yükleyin.")
-
-    elif sporcular.empty or testler.empty:
-
-        st.warning("Sporcu veya test verisi bulunamadı.")
-
-    else:
-
-        sonuc = testler.merge(
-            sporcular,
-            left_on="sporcu_id",
-            right_on="id",
-            how="left",
-            suffixes=("_test", "_sporcu")
-        )
-
-        st.subheader("Ön Test Sporcu Listesi")
-        st.dataframe(sonuc, use_container_width=True)
-
-        st.divider()
-
-        st.subheader("Puanlama Sistemi")
-
-        if st.button("Ön Test Puanlarını Hesapla"):
-
-            normlar = pd.read_excel(
-                norm_dosya,
-                sheet_name=None
-            )
-
-            puanli = sonuc.copy()
-
-            test_eslestirme = {
-                "BOY": "boy",
-                "KULAÇ": "kulac",
-                "DURARAK UZUN ATLAMA": "durarak_uzun_atlama",
-                "20 M. SPRINT": "sprint20",
-                "OTUR UZAN": "otur_uzan",
-                "MEKİK": "mekik"
-            }
-
-            for norm_sayfa, test_kolonu in test_eslestirme.items():
-
-                puan_kolonu = f"{test_kolonu}_puan"
-
-                if test_kolonu not in puanli.columns:
-                    puanli[puan_kolonu] = None
-                    continue
-
-                norm_df = normlar[norm_sayfa]
-
-                puanlar = []
-
-                for _, row in puanli.iterrows():
-
-                    deger = row[test_kolonu]
-
-                    if test_kolonu == "boy" and deger not in [None, "", 0, 0.0] and float(deger) < 3:
-                        deger = float(deger) * 100
-
-                    puan = norm_puani_bul(
-                        norm_df=norm_df,
-                        test_adi=norm_sayfa,
-                        cinsiyet=row["cinsiyet"],
-                        yas=row["yas"],
-                        sonuc=deger
-                    )
-
-                    puanlar.append(puan)
-
-                puanli[puan_kolonu] = puanlar
-
-            puan_kolonlari = [
-                kolon for kolon in puanli.columns
-                if kolon.endswith("_puan")
-            ]
-
-            puanli["toplam_puan"] = puanli[puan_kolonlari].sum(axis=1, skipna=True)
-
-            st.success("Ön test puanları hesaplandı.")
-
-            st.subheader("Puanlı Ön Test Sonuçları")
-            st.dataframe(puanli, use_container_width=True)
-
-            
-            from io import BytesIO
-
-            buffer = BytesIO()
-
-            with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-                puanli.to_excel(writer, index=False, sheet_name="Ön Test Puanları")
-
-            st.download_button(
-                label="📥 Ön Test Excel Çıktısını İndir",
-                data=buffer.getvalue(),
-                file_name="on_test_puanli_sonuclar.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+    st.subheader("Test Verileri")
+    st.dataframe(testler, use_container_width=True)
 
 
 # ---------------------------
@@ -499,16 +570,59 @@ elif sayfa == "🏅 Branş Amaçlı":
 
     st.title("Branş Amaçlı")
 
-    st.info("Bu sayfada branş yönlendirme puanlama, renklendirme ve Excel çıktısı yapılacak.")
-
     sporcular = sporculari_getir()
     testler = testleri_getir()
 
-    st.subheader("Sporcu Verileri")
-    st.dataframe(sporcular, use_container_width=True)
+    if sporcular.empty:
+        st.warning("Önce sporcu kaydı oluşturun.")
+    elif testler.empty:
+        st.warning("Henüz test sonucu bulunmuyor.")
+    else:
+        norm_dosyasi = _norm_dosyasi_bul()
+        yuklenen_norm = st.file_uploader(
+            "Norm tablosu",
+            type=["xlsx"],
+            help="NORM TABLO.xlsx bulunamazsa buradan yükleyebilirsiniz.",
+        )
 
-    st.subheader("Test Verileri")
-    st.dataframe(testler, use_container_width=True)
+        kaynak = yuklenen_norm if yuklenen_norm is not None else norm_dosyasi
+
+        if kaynak is None:
+            st.error("NORM TABLO.xlsx bulunamadı. Norm dosyasını bu sayfadan yükleyin.")
+        else:
+            try:
+                normlar = _normlari_oku(kaynak)
+                sonuc = brans_amacli_sonuclari_hazirla(sporcular, testler, normlar)
+
+                puan_kolonlari = [kolon for kolon in sonuc.columns if "PUAN" in kolon]
+
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Sporcu", len(sonuc))
+                with col2:
+                    st.metric("Puanlanan Test", len(puan_kolonlari) - 1)
+                with col3:
+                    st.metric("En Yüksek Toplam", int(sonuc["TOPLAM PUAN"].max()))
+
+                st.subheader("Branş Amaçlı Puanlama Sonuçları")
+
+                st.dataframe(
+                    sonuc.style.applymap(_puan_renk_css, subset=puan_kolonlari),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+                excel = brans_excel_olustur(sonuc)
+
+                st.download_button(
+                    "Excel Çıktısını İndir",
+                    data=excel,
+                    file_name="brans_amacli_puanlama.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+
+            except Exception as e:
+                st.error(f"Branş amaçlı puanlama oluşturulamadı: {e}")
 
 
 # ---------------------------
