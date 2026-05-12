@@ -72,6 +72,7 @@ def norm_puani_bul(norm_df, test_adi, cinsiyet, yas, sonuc):
 
     for kategori, puan in kategoriler.items():
         aralik = str(satir[kategori]).replace(",", ".").strip()
+        aralik = aralik.replace(",", ".")
 
         if "≤" in aralik:
             limit = sayiya_cevir(aralik.replace("≤", ""))
@@ -83,10 +84,19 @@ def norm_puani_bul(norm_df, test_adi, cinsiyet, yas, sonuc):
             if sonuc >= limit:
                 return puan
 
-        elif "-" in aralik:
+                elif "-" in aralik:
+
+            aralik = aralik.replace(" ", "")
             parcalar = aralik.split("-")
+
+            if len(parcalar) != 2:
+                continue
+
             a = sayiya_cevir(parcalar[0])
             b = sayiya_cevir(parcalar[1])
+
+            if a is None or b is None:
+                continue
 
             alt = min(a, b)
             ust = max(a, b)
