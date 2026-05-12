@@ -606,6 +606,16 @@ ON_TEST_PUANLARI = {
     "ÇOK ÜSTÜ": 25,
 }
 
+ON_TEST_SEVIYE_SIRASI = list(ON_TEST_PUANLARI.keys())
+
+ON_TEST_TERS_SEVIYE = {
+    "ÇOK ALTI": "ÇOK ÜSTÜ",
+    "ALTI": "ÜSTÜ",
+    "ORTALAMA": "ORTALAMA",
+    "ÜSTÜ": "ALTI",
+    "ÇOK ÜSTÜ": "ÇOK ALTI",
+}
+
 ON_TEST_BARAJLARI = {
     7: 50,
     8: 60,
@@ -643,6 +653,7 @@ ON_TESTLER = {
         "sayfa": "20 M. SPRINT",
         "adaylar": ["20 M. SPRINT", "20M SPRINT", "20 M SPRINT", "SPRINT"],
         "puanlanir": True,
+        "ters_mantik": True,
     },
 }
 
@@ -677,6 +688,16 @@ def on_test_kolon_bul(df, adaylar):
     return None
 
 
+def on_test_tam_kolon_bul(df, aday):
+    normalized_cols = {on_test_normalize_text(c): c for c in df.columns}
+    aday_norm = on_test_normalize_text(aday)
+
+    if aday_norm in normalized_cols:
+        return normalized_cols[aday_norm]
+
+    return on_test_kolon_bul(df, [aday])
+
+
 def on_test_aralik_uyuyor_mu(deger, aralik):
     metin = str(aralik).replace(",", ".").strip()
     sayilar = re.findall(r"\d+(?:\.\d+)?", metin)
@@ -698,6 +719,16 @@ def on_test_aralik_uyuyor_mu(deger, aralik):
         return alt <= deger <= ust
 
     return False
+
+
+def on_test_aralik_ilk_sayi(aralik):
+    metin = str(aralik).replace(",", ".").strip()
+    sayilar = re.findall(r"\d+(?:\.\d+)?", metin)
+
+    if not sayilar:
+        return None
+
+    return float(sayilar[0])
 
 
 def on_test_norm_dosyasi_bul():
@@ -740,6 +771,55 @@ def on_test_sheet_oku(norm_dosya, sheet_adi):
     return pd.read_excel(norm_dosya, sheet_name=sayfalar[sayfa_norm])
 
 
+def on_test_norm_indexi_hazirla(norm_dosya):
+    excel = pd.ExcelFile(norm_dosya)
+    sayfalar = {
+        on_test_normalize_text(s): s
+        for s in excel.sheet_names
+    }
+    norm_index = {}
+
+    for test, bilgi in ON_TESTLER.items():
+        sayfa_norm = on_test_normalize_text(bilgi["sayfa"])
+
+        if sayfa_norm not in sayfalar:
+            raise ValueError(
+                f"Ön Test norm dosyasında '{bilgi['sayfa']}' sayfası bulunamadı. "
+                f"Mevcut sayfalar: {excel.sheet_names}"
+            )
+
+        norm = excel.parse(sheet_name=sayfalar[sayfa_norm])
+        cinsiyet_col = on_test_tam_kolon_bul(norm, "CİNSİYET")
+        yas_col = on_test_tam_kolon_bul(norm, "YAŞ")
+
+        if cinsiyet_col is None or yas_col is None:
+            raise ValueError(f"'{bilgi['sayfa']}' norm sayfasında CİNSİYET veya YAŞ sütunu bulunamadı.")
+
+        seviye_kolonlari = {
+            seviye: on_test_tam_kolon_bul(norm, seviye)
+            for seviye in ON_TEST_SEVIYE_SIRASI
+        }
+
+        for _, row in norm.iterrows():
+            yas = pd.to_numeric(row[yas_col], errors="coerce")
+
+            if pd.isna(yas):
+                continue
+
+            kurallar = {
+                seviye: row[kolon] if kolon is not None and kolon in row else None
+                for seviye, kolon in seviye_kolonlari.items()
+            }
+            anahtar = (
+                test,
+                on_test_temizle_metin(row[cinsiyet_col]),
+                int(yas),
+            )
+            norm_index[anahtar] = kurallar
+
+    return norm_index
+
+
 def on_test_yas_hesapla(ham):
     dogum_tarihi_col = on_test_kolon_bul(ham, ["DOĞUM TARİHİ", "DOGUM TARIHI"])
     dogum_yili_col = on_test_kolon_bul(ham, ["DOĞUM YILI", "DOGUM YILI"])
@@ -780,7 +860,17 @@ def on_test_veriyi_standartlastir(ham):
     return ham
 
 
-def on_test_norm_seviye_bul(deger, norm_satiri):
+def on_test_norm_satiri_ters_mi(norm_kurallari):
+    cok_alti = on_test_aralik_ilk_sayi(norm_kurallari.get("ÇOK ALTI"))
+    cok_ustu = on_test_aralik_ilk_sayi(norm_kurallari.get("ÇOK ÜSTÜ"))
+
+    if cok_alti is None or cok_ustu is None:
+        return False
+
+    return cok_alti > cok_ustu
+
+
+def on_test_norm_seviye_bul(deger, norm_kurallari, ters_mantik=False):
     if pd.isna(deger) or on_test_temizle_metin(deger) in ["VERİ YOK", "VERI YOK", "NAN", ""]:
         return "ÇOK ALTI"
 
@@ -789,37 +879,38 @@ def on_test_norm_seviye_bul(deger, norm_satiri):
     except Exception:
         return "ÇOK ALTI"
 
-    for kolon in ON_TEST_PUANLARI:
-        if kolon in norm_satiri and on_test_aralik_uyuyor_mu(deger, norm_satiri[kolon]):
-            return kolon
+    seviye = "ÇOK ALTI"
 
-    return "ÇOK ALTI"
+    for kolon in ON_TEST_SEVIYE_SIRASI:
+        if kolon in norm_kurallari and on_test_aralik_uyuyor_mu(deger, norm_kurallari[kolon]):
+            seviye = kolon
+            break
+
+    if ters_mantik and not on_test_norm_satiri_ters_mi(norm_kurallari):
+        return ON_TEST_TERS_SEVIYE[seviye]
+
+    return seviye
 
 
 def on_test_kriter_hesapla(ham, puan_sutunlari):
     ham["TOPLAM ÖN TEST PUANI"] = ham[puan_sutunlari].sum(axis=1)
-
-    durumlar = []
-    for _, row in ham.iterrows():
-        yas = int(row["YAŞ"]) if pd.notna(row["YAŞ"]) else 0
-        baraj = ON_TEST_BARAJLARI.get(yas)
-
-        if baraj is not None and row["TOPLAM ÖN TEST PUANI"] >= baraj:
-            durumlar.append("ÇAĞRILACAK")
-        else:
-            durumlar.append("ÇAĞRILMAYACAK")
-
-    ham["EUROFIT DURUMU"] = durumlar
+    barajlar = ham["YAŞ"].map(ON_TEST_BARAJLARI)
+    cagrilacak = barajlar.notna() & (ham["TOPLAM ÖN TEST PUANI"] >= barajlar)
+    ham["EUROFIT DURUMU"] = "ÇAĞRILMAYACAK"
+    ham.loc[cagrilacak, "EUROFIT DURUMU"] = "ÇAĞRILACAK"
     return ham
 
 
 def on_test_degerlendir(ham, norm_dosya):
     ham = on_test_veriyi_standartlastir(ham)
     ham = on_test_yas_hesapla(ham)
+    norm_index = on_test_norm_indexi_hazirla(norm_dosya)
 
     if "CİNSİYET" not in ham.columns:
         ham["CİNSİYET"] = ""
 
+    temiz_cinsiyetler = ham["CİNSİYET"].map(on_test_temizle_metin)
+    yaslar = pd.to_numeric(ham["YAŞ"], errors="coerce").fillna(0).astype(int)
     puan_sutunlari = []
 
     for test, bilgi in ON_TESTLER.items():
@@ -834,34 +925,32 @@ def on_test_degerlendir(ham, norm_dosya):
             ham[seviye_sutunu] = "ÇOK ALTI"
             if bilgi["puanlanir"]:
                 ham[puan_sutunu] = ON_TEST_PUANLARI["ÇOK ALTI"]
+            else:
+                ham[f"{test} AÇIKLAMA"] = ham[seviye_sutunu]
             continue
 
-        norm = on_test_sheet_oku(norm_dosya, bilgi["sayfa"])
         seviyeler = []
-        puanlar = []
+        degerler = ham[test]
 
-        for _, row in ham.iterrows():
-            cinsiyet = on_test_temizle_metin(row["CİNSİYET"])
-            yas = row["YAŞ"]
+        for deger, cinsiyet, yas in zip(degerler, temiz_cinsiyetler, yaslar):
+            norm_kurallari = norm_index.get((test, cinsiyet, yas))
 
-            norm_satirlari = norm[
-                (norm["CİNSİYET"].astype(str).str.upper().str.strip() == cinsiyet)
-                & (norm["YAŞ"] == yas)
-            ]
-
-            if norm_satirlari.empty:
+            if norm_kurallari is None:
                 seviye = "ÇOK ALTI"
             else:
-                seviye = on_test_norm_seviye_bul(row[test], norm_satirlari.iloc[0])
+                seviye = on_test_norm_seviye_bul(
+                    deger,
+                    norm_kurallari,
+                    ters_mantik=bilgi.get("ters_mantik", False),
+                )
 
             seviyeler.append(seviye)
 
-            if bilgi["puanlanir"]:
-                puanlar.append(ON_TEST_PUANLARI[seviye])
-
         ham[seviye_sutunu] = seviyeler
         if bilgi["puanlanir"]:
-            ham[puan_sutunu] = puanlar
+            ham[puan_sutunu] = ham[seviye_sutunu].map(ON_TEST_PUANLARI)
+        else:
+            ham[f"{test} AÇIKLAMA"] = ham[seviye_sutunu]
 
     ham = on_test_kriter_hesapla(ham, puan_sutunlari)
     return ham
@@ -884,9 +973,9 @@ def on_test_excel_olustur(ham):
         if test in ham.columns:
             test_sutunlari.append(test)
 
-        seviye_sutunu = f"{test} SEVİYE"
-        if seviye_sutunu in ham.columns:
-            test_sutunlari.append(seviye_sutunu)
+        aciklama_sutunu = f"{test} AÇIKLAMA"
+        if not bilgi["puanlanir"] and aciklama_sutunu in ham.columns:
+            test_sutunlari.append(aciklama_sutunu)
 
         puan_sutunu = f"{test} PUAN"
         if bilgi["puanlanir"] and puan_sutunu in ham.columns:
@@ -911,68 +1000,52 @@ def on_test_excel_olustur(ham):
     wb = load_workbook(output)
     ws = wb.active
     basliklar = [cell.value for cell in ws[1]]
+    baslik_index = {
+        baslik: sira + 1
+        for sira, baslik in enumerate(basliklar)
+    }
+    seviye_fills = {
+        seviye: PatternFill(
+            start_color=renk,
+            end_color=renk,
+            fill_type="solid",
+        )
+        for seviye, renk in ON_TEST_RENKLER.items()
+    }
+
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = ws.dimensions
+
+    for cell in ws[1]:
+        cell.font = Font(name="Calibri", size=12, bold=True)
+        cell.alignment = Alignment(
+            horizontal="center",
+            vertical="center",
+            wrap_text=True,
+        )
 
     for test in ON_TESTLER:
         seviye_sutunu = f"{test} SEVİYE"
 
-        if seviye_sutunu not in basliklar:
+        if test not in baslik_index or seviye_sutunu not in ham.columns:
             continue
 
-        seviye_col_no = basliklar.index(seviye_sutunu) + 1
-        renklenecek_kolonlar = [seviye_col_no]
+        test_col_no = baslik_index[test]
+        seviyeler = ham[seviye_sutunu].tolist()
 
-        if test in basliklar:
-            renklenecek_kolonlar.append(basliklar.index(test) + 1)
+        for row_offset, seviye in enumerate(seviyeler, start=2):
+            if row_offset > ws.max_row:
+                break
 
-        puan_sutunu = f"{test} PUAN"
-        if puan_sutunu in basliklar:
-            renklenecek_kolonlar.append(basliklar.index(puan_sutunu) + 1)
+            if seviye in seviye_fills:
+                ws.cell(row=row_offset, column=test_col_no).fill = seviye_fills[seviye]
 
-        for row_no in range(2, ws.max_row + 1):
-            seviye = ws.cell(row=row_no, column=seviye_col_no).value
-
-            if seviye in ON_TEST_RENKLER:
-                fill = PatternFill(
-                    start_color=ON_TEST_RENKLER[seviye],
-                    end_color=ON_TEST_RENKLER[seviye],
-                    fill_type="solid",
-                )
-
-                for col_no in renklenecek_kolonlar:
-                    ws.cell(row=row_no, column=col_no).fill = fill
-
-    ince_kenar = Side(style="thin", color="000000")
-    tam_kenarlik = Border(
-        left=ince_kenar,
-        right=ince_kenar,
-        top=ince_kenar,
-        bottom=ince_kenar,
-    )
-
-    for row in ws.iter_rows():
-        for cell in row:
-            cell.font = Font(name="Calibri", size=12)
-            cell.alignment = Alignment(
-                horizontal="center",
-                vertical="center",
-                wrap_text=True,
-            )
-            cell.border = tam_kenarlik
-
-    for row_num in range(1, ws.max_row + 1):
-        ws.row_dimensions[row_num].height = 30
+    ws.row_dimensions[1].height = 30
 
     for column_cells in ws.columns:
-        max_length = 0
+        baslik = str(column_cells[0].value or "")
         column_letter = get_column_letter(column_cells[0].column)
-
-        for cell in column_cells:
-            if cell.value is not None:
-                cell_value = str(cell.value)
-                longest_line = max(len(line) for line in cell_value.split("\n"))
-                max_length = max(max_length, longest_line)
-
-        adjusted_width = max(max_length + 3, 10)
+        adjusted_width = max(len(baslik) + 3, 10)
         ws.column_dimensions[column_letter].width = min(adjusted_width, 35)
 
     final = BytesIO()
@@ -1266,6 +1339,18 @@ elif sayfa == "🧪 Ön Testler":
     else:
         try:
             on_test_ham = pd.read_excel(on_test_ham_dosya)
+            on_test_source_id = (
+                on_test_ham_dosya.name,
+                getattr(on_test_ham_dosya, "size", None),
+                on_test_yuklenen_norm.name,
+                getattr(on_test_yuklenen_norm, "size", None),
+            )
+
+            if st.session_state.get("on_test_source_id") != on_test_source_id:
+                st.session_state.pop("on_test_sonuc", None)
+                st.session_state.pop("on_test_excel_tumu", None)
+                st.session_state.pop("on_test_excel_cagrilacak", None)
+                st.session_state["on_test_source_id"] = on_test_source_id
 
             metrik1, metrik2, metrik3 = st.columns(3)
 
@@ -1282,11 +1367,18 @@ elif sayfa == "🧪 Ön Testler":
             st.dataframe(on_test_ham.head(), use_container_width=True)
 
             if st.button("Ön Testleri Değerlendir"):
-                on_test_sonuc = on_test_degerlendir(
-                    on_test_ham.copy(),
-                    on_test_yuklenen_norm,
-                )
+                with st.spinner("Ön testler değerlendiriliyor, lütfen bekleyin..."):
+                    on_test_sonuc = on_test_degerlendir(
+                        on_test_ham.copy(),
+                        on_test_yuklenen_norm,
+                    )
 
+                st.session_state["on_test_sonuc"] = on_test_sonuc
+                st.session_state.pop("on_test_excel_tumu", None)
+                st.session_state.pop("on_test_excel_cagrilacak", None)
+
+            if "on_test_sonuc" in st.session_state:
+                on_test_sonuc = st.session_state["on_test_sonuc"]
                 cagrilacak = on_test_sonuc[
                     on_test_sonuc["EUROFIT DURUMU"] == "ÇAĞRILACAK"
                 ].copy()
@@ -1308,16 +1400,19 @@ elif sayfa == "🧪 Ön Testler":
                 on_test_onizleme = [
                     "S.N.",
                     "AD SOYAD",
+                    "CİNSİYET",
                     "YAŞ",
-                    "BOY SEVİYE",
-                    "KULAÇ SEVİYE",
-                    "OTUR UZAN SEVİYE",
+                    "BOY",
+                    "BOY AÇIKLAMA",
+                    "KULAÇ",
+                    "KULAÇ AÇIKLAMA",
+                    "OTUR UZAN",
                     "OTUR UZAN PUAN",
-                    "DURARAK UZUN ATLAMA SEVİYE",
+                    "DURARAK UZUN ATLAMA",
                     "DURARAK UZUN ATLAMA PUAN",
-                    "MEKİK SEVİYE",
+                    "MEKİK",
                     "MEKİK PUAN",
-                    "20 M. SPRINT SEVİYE",
+                    "20 M. SPRINT",
                     "20 M. SPRINT PUAN",
                     "TOPLAM ÖN TEST PUANI",
                     "EUROFIT DURUMU",
@@ -1329,26 +1424,37 @@ elif sayfa == "🧪 Ön Testler":
                     hide_index=True,
                 )
 
-                on_test_excel_tumu = on_test_excel_olustur(on_test_sonuc)
-                on_test_excel_cagrilacak = on_test_excel_olustur(cagrilacak)
-
                 indirme1, indirme2 = st.columns(2)
 
                 with indirme1:
-                    st.download_button(
-                        label="Tüm Öğrenciler Excel",
-                        data=on_test_excel_tumu,
-                        file_name="USGEP_ON_TEST_TUM_OGRENCILER.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    )
+                    if st.button("Tüm Öğrenciler Excel Hazırla", key="on_test_excel_tumu_hazirla"):
+                        with st.spinner("Tüm öğrenciler Excel çıktısı hazırlanıyor..."):
+                            st.session_state["on_test_excel_tumu"] = on_test_excel_olustur(
+                                on_test_sonuc
+                            ).getvalue()
+
+                    if "on_test_excel_tumu" in st.session_state:
+                        st.download_button(
+                            label="Tüm Öğrenciler Excel İndir",
+                            data=st.session_state["on_test_excel_tumu"],
+                            file_name="USGEP_ON_TEST_TUM_OGRENCILER.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        )
 
                 with indirme2:
-                    st.download_button(
-                        label="Eurofit'e Çağrılacaklar Excel",
-                        data=on_test_excel_cagrilacak,
-                        file_name="USGEP_ON_TEST_EUROFIT_CAGRILACAKLAR.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    )
+                    if st.button("Eurofit’e Çağrılacaklar Excel Hazırla", key="on_test_excel_cagrilacak_hazirla"):
+                        with st.spinner("Eurofit’e çağrılacaklar Excel çıktısı hazırlanıyor..."):
+                            st.session_state["on_test_excel_cagrilacak"] = on_test_excel_olustur(
+                                cagrilacak
+                            ).getvalue()
+
+                    if "on_test_excel_cagrilacak" in st.session_state:
+                        st.download_button(
+                            label="Eurofit’e Çağrılacaklar Excel İndir",
+                            data=st.session_state["on_test_excel_cagrilacak"],
+                            file_name="USGEP_ON_TEST_EUROFIT_CAGRILACAKLAR.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        )
 
         except Exception as e:
             st.error(f"Ön Test değerlendirmesi oluşturulamadı: {e}")
