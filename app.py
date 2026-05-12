@@ -37,16 +37,16 @@ with st.sidebar:
 
     st.title("USGEP Menü")
 
-    sayfa = st.radio(
-        "Sayfa Seç",
-        [
-            "🏠 Ana Sayfa",
-            "🧒 Sporcu Kayıt",
-            "📋 Test Veri Girişi",
-            "📊 Sonuçlar",
-            "📈 Dashboard"
-        ]
-    )
+[
+    "🏠 Ana Sayfa",
+    "🧒 Sporcu Kayıt",
+    "📋 Test Veri Girişi",
+    "📊 Sonuçlar",
+    "📈 Dashboard",
+    "🧪 Ön Testler",
+    "🇪🇺 Eurofit",
+    "🏅 Branş Amaçlı"
+]
 
 test_modu = st.query_params.get("test", "normal")
 
@@ -276,6 +276,65 @@ elif sayfa == "📈 Dashboard":
     st.dataframe(sporcular, use_container_width=True)
 
     st.subheader("Test Listesi")
+    st.dataframe(testler, use_container_width=True)
+
+# ---------------------------
+# ÖN TESTLER
+# ---------------------------
+
+elif sayfa == "🧪 Ön Testler":
+
+    st.title("Ön Testler")
+
+    st.info("Bu sayfada ön test sonuçları, puanlama ve Excel çıktı işlemleri yapılacak.")
+
+    sporcular = sporculari_getir()
+    testler = testleri_getir()
+
+    st.subheader("Sporcu Verileri")
+    st.dataframe(sporcular, use_container_width=True)
+
+    st.subheader("Test Verileri")
+    st.dataframe(testler, use_container_width=True)
+
+
+# ---------------------------
+# EUROFIT
+# ---------------------------
+
+elif sayfa == "🇪🇺 Eurofit":
+
+    st.title("Eurofit")
+
+    st.info("Bu sayfada Eurofit testleri için değerlendirme, puanlama ve renklendirme yapılacak.")
+
+    sporcular = sporculari_getir()
+    testler = testleri_getir()
+
+    st.subheader("Sporcu Verileri")
+    st.dataframe(sporcular, use_container_width=True)
+
+    st.subheader("Test Verileri")
+    st.dataframe(testler, use_container_width=True)
+
+
+# ---------------------------
+# BRANŞ AMAÇLI
+# ---------------------------
+
+elif sayfa == "🏅 Branş Amaçlı":
+
+    st.title("Branş Amaçlı")
+
+    st.info("Bu sayfada branş yönlendirme puanlama, renklendirme ve Excel çıktısı yapılacak.")
+
+    sporcular = sporculari_getir()
+    testler = testleri_getir()
+
+    st.subheader("Sporcu Verileri")
+    st.dataframe(sporcular, use_container_width=True)
+
+    st.subheader("Test Verileri")
     st.dataframe(testler, use_container_width=True)
 
 
