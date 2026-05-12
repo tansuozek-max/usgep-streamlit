@@ -27,7 +27,74 @@ def testleri_getir():
 
 def temiz_deger_mi(deger):
     return deger not in [None, "", 0, 0.0]
+def yas_hesapla(yas_degeri):
+    yas_degeri = int(yas_degeri)
 
+    if yas_degeri > 1000:
+        return 2026 - yas_degeri
+
+    return yas_degeri
+
+
+def sayiya_cevir(deger):
+    if pd.isna(deger):
+        return None
+
+    return float(str(deger).replace(",", ".").strip())
+
+
+def norm_puani_bul(norm_df, test_adi, cinsiyet, yas, sonuc):
+    if sonuc in [None, "", 0, 0.0] or pd.isna(sonuc):
+        return None
+
+    yas = yas_hesapla(yas)
+    cinsiyet = str(cinsiyet).strip().upper()
+
+    satirlar = norm_df[
+        (norm_df["CİNSİYET"].astype(str).str.upper() == cinsiyet)
+        & (norm_df["YAŞ"].astype(int) == yas)
+    ]
+
+    if satirlar.empty:
+        return None
+
+    satir = satirlar.iloc[0]
+
+    kategoriler = {
+        "ÇOK ALTI": 1,
+        "ALTI": 2,
+        "ORTALAMA": 3,
+        "ÜSTÜ": 4,
+        "ÇOK ÜSTÜ": 5
+    }
+
+    sonuc = float(sonuc)
+
+    for kategori, puan in kategoriler.items():
+        aralik = str(satir[kategori]).replace(",", ".").strip()
+
+        if "≤" in aralik:
+            limit = sayiya_cevir(aralik.replace("≤", ""))
+            if sonuc <= limit:
+                return puan
+
+        elif "≥" in aralik:
+            limit = sayiya_cevir(aralik.replace("≥", ""))
+            if sonuc >= limit:
+                return puan
+
+        elif "-" in aralik:
+            parcalar = aralik.split("-")
+            a = sayiya_cevir(parcalar[0])
+            b = sayiya_cevir(parcalar[1])
+
+            alt = min(a, b)
+            ust = max(a, b)
+
+            if alt <= sonuc <= ust:
+                return puan
+
+    return None
 
 SAYFALAR = [
     "🏠 Ana Sayfa",
@@ -290,7 +357,13 @@ elif sayfa == "🧪 Ön Testler":
     sporcular = sporculari_getir()
     testler = testleri_getir()
 
-    if sporcular.empty or testler.empty:
+    norm_dosya = Path(__file__).parent / "NORM TABLO ÖN TESTLER.xlsx"
+
+    if not norm_dosya.exists():
+
+        st.error("Norm dosyası bulunamadı. GitHub'a 'NORM TABLO ÖN TESTLER.xlsx' dosyasını yükleyin.")
+
+    elif sporcular.empty or testler.empty:
 
         st.warning("Sporcu veya test verisi bulunamadı.")
 
@@ -305,11 +378,7 @@ elif sayfa == "🧪 Ön Testler":
         )
 
         st.subheader("Ön Test Sporcu Listesi")
-
-        st.dataframe(
-            sonuc,
-            use_container_width=True
-        )
+        st.dataframe(sonuc, use_container_width=True)
 
         st.divider()
 
@@ -317,8 +386,80 @@ elif sayfa == "🧪 Ön Testler":
 
         if st.button("Ön Test Puanlarını Hesapla"):
 
-            st.success(
-                "Norm tablosu bağlantısı hazır. Puanlama sistemi sonraki aşamada eklenecek."
+            normlar = pd.read_excel(
+                norm_dosya,
+                sheet_name=None
+            )
+
+            puanli = sonuc.copy()
+
+            test_eslestirme = {
+                "BOY": "boy",
+                "KULAÇ": "kulac",
+                "DURARAK UZUN ATLAMA": "durarak_uzun_atlama",
+                "20 M. SPRINT": "sprint20",
+                "OTUR UZAN": "otur_uzan",
+                "MEKİK": "mekik"
+            }
+
+            for norm_sayfa, test_kolonu in test_eslestirme.items():
+
+                puan_kolonu = f"{test_kolonu}_puan"
+
+                if test_kolonu not in puanli.columns:
+                    puanli[puan_kolonu] = None
+                    continue
+
+                norm_df = normlar[norm_sayfa]
+
+                puanlar = []
+
+                for _, row in puanli.iterrows():
+
+                    deger = row[test_kolonu]
+
+                    if test_kolonu == "boy" and deger not in [None, "", 0, 0.0] and float(deger) < 3:
+                        deger = float(deger) * 100
+
+                    puan = norm_puani_bul(
+                        norm_df=norm_df,
+                        test_adi=norm_sayfa,
+                        cinsiyet=row["cinsiyet"],
+                        yas=row["yas"],
+                        sonuc=deger
+                    )
+
+                    puanlar.append(puan)
+
+                puanli[puan_kolonu] = puanlar
+
+            puan_kolonlari = [
+                kolon for kolon in puanli.columns
+                if kolon.endswith("_puan")
+            ]
+
+            puanli["toplam_puan"] = puanli[puan_kolonlari].sum(axis=1, skipna=True)
+
+            st.success("Ön test puanları hesaplandı.")
+
+            st.subheader("Puanlı Ön Test Sonuçları")
+            st.dataframe(puanli, use_container_width=True)
+
+            excel_cikti = puanli.to_excel(
+                index=False
+            )
+            from io import BytesIO
+
+            buffer = BytesIO()
+
+            with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+                puanli.to_excel(writer, index=False, sheet_name="Ön Test Puanları")
+
+            st.download_button(
+                label="📥 Ön Test Excel Çıktısını İndir",
+                data=buffer.getvalue(),
+                file_name="on_test_puanli_sonuclar.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
 
