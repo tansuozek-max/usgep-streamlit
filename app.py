@@ -445,9 +445,7 @@ elif sayfa == "🧪 Ön Testler":
             st.subheader("Puanlı Ön Test Sonuçları")
             st.dataframe(puanli, use_container_width=True)
 
-            excel_cikti = puanli.to_excel(
-                index=False
-            )
+            
             from io import BytesIO
 
             buffer = BytesIO()
