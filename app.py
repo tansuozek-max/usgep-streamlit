@@ -994,11 +994,15 @@ def on_test_excel_olustur(ham):
     temiz = ham[kolonlar].copy()
 
     output = BytesIO()
-    temiz.to_excel(output, index=False)
+
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        temiz.to_excel(writer, index=False, sheet_name="Ön Testler")
+        ws = writer.sheets["Ön Testler"]
+
     output.seek(0)
 
     wb = load_workbook(output)
-    ws = wb.active
+    ws = wb["Ön Testler"]
     basliklar = [cell.value for cell in ws[1]]
     baslik_index = {
         baslik: sira + 1
@@ -1016,8 +1020,15 @@ def on_test_excel_olustur(ham):
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = ws.dimensions
 
+    header_fill = PatternFill(
+        start_color="D9EAF7",
+        end_color="D9EAF7",
+        fill_type="solid",
+    )
+
     for cell in ws[1]:
         cell.font = Font(name="Calibri", size=12, bold=True)
+        cell.fill = header_fill
         cell.alignment = Alignment(
             horizontal="center",
             vertical="center",
@@ -1042,11 +1053,19 @@ def on_test_excel_olustur(ham):
 
     ws.row_dimensions[1].height = 30
 
-    for column_cells in ws.columns:
-        baslik = str(column_cells[0].value or "")
-        column_letter = get_column_letter(column_cells[0].column)
-        adjusted_width = max(len(baslik) + 3, 10)
-        ws.column_dimensions[column_letter].width = min(adjusted_width, 35)
+    for baslik, col_no in baslik_index.items():
+        column_letter = get_column_letter(col_no)
+
+        if baslik == "AD SOYAD":
+            ws.column_dimensions[column_letter].width = 28
+        elif baslik in ["EUROFIT DURUMU", "TOPLAM ÖN TEST PUANI"]:
+            ws.column_dimensions[column_letter].width = 20
+        elif "AÇIKLAMA" in str(baslik):
+            ws.column_dimensions[column_letter].width = 16
+        elif "DURARAK UZUN ATLAMA" in str(baslik):
+            ws.column_dimensions[column_letter].width = 24
+        else:
+            ws.column_dimensions[column_letter].width = 13
 
     final = BytesIO()
     wb.save(final)
