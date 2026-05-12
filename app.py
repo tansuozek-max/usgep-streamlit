@@ -287,16 +287,39 @@ elif sayfa == "🧪 Ön Testler":
 
     st.title("Ön Testler")
 
-    st.info("Bu sayfada ön test sonuçları, puanlama ve Excel çıktı işlemleri yapılacak.")
-
     sporcular = sporculari_getir()
     testler = testleri_getir()
 
-    st.subheader("Sporcu Verileri")
-    st.dataframe(sporcular, use_container_width=True)
+    if sporcular.empty or testler.empty:
 
-    st.subheader("Test Verileri")
-    st.dataframe(testler, use_container_width=True)
+        st.warning("Sporcu veya test verisi bulunamadı.")
+
+    else:
+
+        sonuc = testler.merge(
+            sporcular,
+            left_on="sporcu_id",
+            right_on="id",
+            how="left",
+            suffixes=("_test", "_sporcu")
+        )
+
+        st.subheader("Ön Test Sporcu Listesi")
+
+        st.dataframe(
+            sonuc,
+            use_container_width=True
+        )
+
+        st.divider()
+
+        st.subheader("Puanlama Sistemi")
+
+        if st.button("Ön Test Puanlarını Hesapla"):
+
+            st.success(
+                "Norm tablosu bağlantısı hazır. Puanlama sistemi sonraki aşamada eklenecek."
+            )
 
 
 # ---------------------------
