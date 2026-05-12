@@ -1,9 +1,12 @@
 import streamlit as st
 import pandas as pd
 import re
-from datetime import date
+import unicodedata
 from io import BytesIO
 from pathlib import Path
+from openpyxl import load_workbook
+from openpyxl.styles import PatternFill, Alignment, Font, Border, Side
+from openpyxl.utils import get_column_letter
 from supabase import create_client
 
 st.set_page_config(
@@ -32,55 +35,478 @@ def temiz_deger_mi(deger):
     return deger not in [None, "", 0, 0.0]
 
 
-BRANS_TESTLERI = [
-    ("BOY", "boy", "BOY"),
-    ("KİLO", "kilo", "KİLO"),
-    ("KULAÇ", "kulac", "KULAÇ"),
-    ("EL ÇABUKLUĞU", "el_cabuklugu", "EL ÇABUKLUĞU"),
-    ("AYAK ÇABUKLUĞU", "ayak_cabuklugu", "AYAK ÇABUKLUĞU"),
-    ("EL KAVRAMA", "el_kavrama", "EL KAVRAMA"),
-    ("SIRT BACAK", "sirt_bacak", "SIRT BACAK KUVVETİ"),
-    ("HEXAGON", "hexagon", "HEXAGON"),
-    ("DURARAK UZUN ATLAMA", "durarak_uzun_atlama", "DURARAK UZUN ATLAMA"),
-    ("GERİYE SAĞLIK TOPU ATMA", "geriye_saglik_topu", "GERİYE SAĞLIK TOPU FIRLATMA"),
-    ("DİKEY SIÇRAMA", "dikey_sicrama", "DİKEY SIÇRAMA"),
-    ("LANE AGILITY", "lane_ceviklik", "LANE ÇEVİKLİK"),
-    ("20 M. SPRINT", "sprint20", "20 M. SPRINT"),
+RENKLER = {
+    4: "FF0000",
+    8: "FFC000",
+    12: "5B9BD5",
+    16: "A9D08E",
+    20: "00B050",
+}
+
+TEST_SAYFA_ESLESME = {
+    "BOY": "BOY",
+    "KİLO": "KİLO",
+    "KULAÇ": "KULAÇ",
+    "DURARAK UZUN ATLAMA": "DURARAK UZUN ATLAMA",
+    "DİKEY SIÇRAMA": "DİKEY SIÇRAMA",
+    "EL KAVRAMA": "EL KAVRAMA",
+    "GERİYE SAĞLIK TOPU ATMA": "GERİYE SAĞLIK TOPU FIRLATMA",
+    "20 M. SPRINT": "20 M. SPRINT",
+    "AYAK ÇABUKLUĞU": "AYAK ÇABUKLUĞU",
+    "EL ÇABUKLUĞU": "EL ÇABUKLUĞU",
+    "SIRT BACAK": "SIRT BACAK KUVVETİ",
+    "HEXAGON": "HEXAGON",
+    "LANE AGILITY": "LANE ÇEVİKLİK",
+}
+
+TESTLER = list(TEST_SAYFA_ESLESME.keys()) + ["FONKSİYONEL ÇÖMELME"]
+
+CIKTI_TEST_SIRASI = [
+    "BOY",
+    "KİLO",
+    "BACAK BOYU",
+    "OTURMA YÜKSEKLİĞİ",
+    "BACAK UZUNLUĞU",
+    "KULAÇ",
+    "FONKSİYONEL ÇÖMELME",
+    "EL ÇABUKLUĞU",
+    "AYAK ÇABUKLUĞU",
+    "EL KAVRAMA",
+    "SIRT BACAK",
+    "HEXAGON",
+    "DURARAK UZUN ATLAMA",
+    "GERİYE SAĞLIK TOPU ATMA",
+    "DİKEY SIÇRAMA",
+    "LANE AGILITY",
+    "20 M. SPRINT",
 ]
 
-NORM_PUANLARI = {
-    "ÇOK ALTI": 4,
-    "ALTI": 8,
-    "ORTALAMA": 12,
-    "ÜSTÜ": 16,
-    "ÇOK ÜSTÜ": 20,
+BRANS_KRITERLERI = {
+    "KARATE": {
+        "yas": [7, 8, 9],
+        "cinsiyet": ["ERKEK", "KIZ"],
+        "kriterler": [
+            "BACAK UZUNLUĞU",
+            "KULAÇ",
+            "DURARAK UZUN ATLAMA",
+            "AYAK ÇABUKLUĞU",
+            "EL ÇABUKLUĞU",
+        ],
+    },
+    "TEKVANDO": {
+        "yas": [7, 8, 9],
+        "cinsiyet": ["ERKEK", "KIZ"],
+        "kriterler": [
+            "BACAK UZUNLUĞU",
+            "KULAÇ",
+            "DURARAK UZUN ATLAMA",
+            "AYAK ÇABUKLUĞU",
+            "FONKSİYONEL ÇÖMELME",
+        ],
+    },
+    "BOKS": {
+        "yas": [9, 10, 11],
+        "cinsiyet": ["ERKEK", "KIZ"],
+        "kriterler": [
+            "KULAÇ",
+            "HEXAGON",
+            "GERİYE SAĞLIK TOPU ATMA",
+            "AYAK ÇABUKLUĞU",
+            "EL ÇABUKLUĞU",
+        ],
+    },
+    "JUDO": {
+        "yas": [7, 8, 9, 10, 11],
+        "cinsiyet": ["ERKEK", "KIZ"],
+        "kriterler": [
+            "DURARAK UZUN ATLAMA",
+            "GERİYE SAĞLIK TOPU ATMA",
+            "SIRT BACAK",
+            "EL KAVRAMA",
+            "AYAK ÇABUKLUĞU",
+        ],
+    },
+    "GÜREŞ": {
+        "yas": [9, 10],
+        "cinsiyet": ["ERKEK"],
+        "kriterler": [
+            "DURARAK UZUN ATLAMA",
+            "GERİYE SAĞLIK TOPU ATMA",
+            "SIRT BACAK",
+            "EL KAVRAMA",
+            "FONKSİYONEL ÇÖMELME",
+        ],
+    },
 }
 
 
-def _metin_norm(metin):
-    return str(metin).strip().upper().replace("İ", "I")
+def normalize_text(x):
+    x = str(x).strip().upper()
+    x = unicodedata.normalize("NFKD", x)
+    x = "".join(c for c in x if not unicodedata.combining(c))
+    x = x.replace("\n", " ")
+    x = re.sub(r"\s+", " ", x)
+    return x
 
 
-def _sayi_yap(deger):
-    if pd.isna(deger):
-        return None
-    if isinstance(deger, (int, float)):
-        return float(deger)
-    temiz = str(deger).strip().replace(",", ".")
+def temizle_metin(x):
+    return str(x).strip().upper()
+
+
+def sayiya_cevir(x):
+    return float(str(x).replace(",", ".").strip())
+
+
+def kolon_bul(df, adaylar):
+    normalized_cols = {normalize_text(c): c for c in df.columns}
+
+    for aday in adaylar:
+        aday_norm = normalize_text(aday)
+
+        for norm_col, original_col in normalized_cols.items():
+            if aday_norm in norm_col:
+                return original_col
+
+    return None
+
+
+def aralik_uyuyor_mu(deger, aralik):
+    metin = str(aralik).replace(",", ".").strip()
+    sayilar = re.findall(r"\d+(?:\.\d+)?", metin)
+
+    if not sayilar:
+        return False
+
+    sayilar = [float(s) for s in sayilar]
+
+    if "≤" in metin or "<=" in metin:
+        return deger <= sayilar[0]
+
+    if "≥" in metin or ">=" in metin:
+        return deger >= sayilar[0]
+
+    if "-" in metin and len(sayilar) >= 2:
+        alt = min(sayilar[0], sayilar[1])
+        ust = max(sayilar[0], sayilar[1])
+        return alt <= deger <= ust
+
+    return False
+
+
+def fonksiyonel_puanla(deger):
+    deger = str(deger).strip()
+
+    if deger == "1":
+        return 4
+    elif deger == "2":
+        return 8
+    elif deger == "3":
+        return 16
+    elif deger == "4":
+        return 20
+
+    return 4
+
+
+def norm_puanla(deger, norm_satiri):
+    if pd.isna(deger) or temizle_metin(deger) in ["VERİ YOK", "VERI YOK", "G", "K", "NAN", ""]:
+        return 4
+
     try:
-        return float(temiz)
-    except ValueError:
-        return None
+        deger = sayiya_cevir(deger)
+    except Exception:
+        return 4
+
+    kolon_puanlari = {
+        "ÇOK ALTI": 4,
+        "ALTI": 8,
+        "ORTALAMA": 12,
+        "ÜSTÜ": 16,
+        "ÇOK ÜSTÜ": 20,
+    }
+
+    for kolon, puan in kolon_puanlari.items():
+        if kolon in norm_satiri and aralik_uyuyor_mu(deger, norm_satiri[kolon]):
+            return puan
+
+    return 4
 
 
-def _yas_hesapla(deger):
-    yas = _sayi_yap(deger)
-    if yas is None:
-        return None
-    yas = int(yas)
-    if yas > 1900:
-        return date.today().year - yas
-    return yas
+def sheet_oku(norm_dosya, sheet_adi):
+    excel = pd.ExcelFile(norm_dosya)
+    sayfalar = {str(s).strip(): s for s in excel.sheet_names}
+
+    if sheet_adi not in sayfalar:
+        raise ValueError(
+            f"Norm dosyasında '{sheet_adi}' sayfası bulunamadı. "
+            f"Mevcut sayfalar: {excel.sheet_names}"
+        )
+
+    return pd.read_excel(norm_dosya, sheet_name=sayfalar[sheet_adi])
+
+
+def yas_hesapla(ham):
+    dogum_tarihi_col = kolon_bul(ham, ["DOĞUM TARİHİ", "DOGUM TARIHI"])
+    dogum_yili_col = kolon_bul(ham, ["DOĞUM YILI", "DOGUM YILI"])
+
+    if dogum_tarihi_col:
+        ham["YAŞ"] = (
+            pd.Timestamp.now().year
+            - pd.to_datetime(ham[dogum_tarihi_col], errors="coerce").dt.year
+        )
+    elif dogum_yili_col:
+        ham["YAŞ"] = (
+            pd.Timestamp.now().year
+            - pd.to_numeric(ham[dogum_yili_col], errors="coerce")
+        )
+    else:
+        ham["YAŞ"] = 0
+
+    ham["YAŞ"] = ham["YAŞ"].fillna(0).astype(int)
+    return ham
+
+
+def bacak_uzunlugu_hesapla(ham):
+    bacak_col = kolon_bul(ham, ["BACAK BOYU", "BACAK BOY"])
+    oturma_col = kolon_bul(
+        ham,
+        ["OTURMA YÜKSEKLİĞİ", "OTURMA YUKSEKLIGI", "OTURMA"]
+    )
+
+    if bacak_col and oturma_col:
+        uzunluklar = []
+        puanlar = []
+
+        for _, row in ham.iterrows():
+            try:
+                bacak = sayiya_cevir(row[bacak_col])
+                oturma = sayiya_cevir(row[oturma_col])
+
+                if bacak > oturma * 0.90:
+                    uzunluklar.append("UZUN BACAK")
+                    puanlar.append(20)
+                else:
+                    uzunluklar.append("KISA BACAK")
+                    puanlar.append(4)
+
+            except Exception:
+                uzunluklar.append("VERİ YOK")
+                puanlar.append(4)
+
+        ham["BACAK UZUNLUĞU"] = uzunluklar
+        ham["BACAK UZUNLUĞU PUAN"] = puanlar
+
+    else:
+        ham["BACAK UZUNLUĞU"] = "VERİ YOK"
+        ham["BACAK UZUNLUĞU PUAN"] = 4
+
+    return ham
+
+
+def islem_yap(ham, norm_dosya):
+    ham = yas_hesapla(ham)
+    ham = bacak_uzunlugu_hesapla(ham)
+
+    for test in TESTLER:
+        puan_sutunu = f"{test} PUAN"
+
+        if test == "FONKSİYONEL ÇÖMELME":
+            if test in ham.columns:
+                ham[puan_sutunu] = ham[test].apply(fonksiyonel_puanla)
+            else:
+                ham[puan_sutunu] = 4
+            continue
+
+        if test not in ham.columns:
+            ham[puan_sutunu] = 4
+            continue
+
+        sayfa = TEST_SAYFA_ESLESME[test]
+        norm = sheet_oku(norm_dosya, sayfa)
+
+        puanlar = []
+
+        for _, row in ham.iterrows():
+            cinsiyet = temizle_metin(row["CİNSİYET"])
+            yas = row["YAŞ"]
+
+            norm_satirlari = norm[
+                (norm["CİNSİYET"].astype(str).str.upper().str.strip() == cinsiyet)
+                & (norm["YAŞ"] == yas)
+            ]
+
+            if norm_satirlari.empty:
+                puanlar.append(4)
+            else:
+                puanlar.append(norm_puanla(row[test], norm_satirlari.iloc[0]))
+
+        ham[puan_sutunu] = puanlar
+
+    for brans, bilgi in BRANS_KRITERLERI.items():
+        sonuclar = []
+        sira_puanlari = []
+
+        for _, row in ham.iterrows():
+            yas = row["YAŞ"]
+            cinsiyet = temizle_metin(row["CİNSİYET"])
+
+            if yas not in bilgi["yas"] or cinsiyet not in bilgi["cinsiyet"]:
+                sonuclar.append("REFERANS DIŞI")
+                sira_puanlari.append(0)
+                continue
+
+            basarili = 0
+            kalite = 0
+
+            for test in bilgi["kriterler"]:
+                puan = row[f"{test} PUAN"]
+
+                if puan >= 12:
+                    basarili += 1
+
+                kalite += puan
+
+            sonuclar.append(f"{basarili}/5 - {kalite}")
+            sira_puanlari.append(basarili * 1000 + kalite)
+
+        ham[f"{brans} SONUÇ"] = sonuclar
+        ham[f"{brans} SIRA"] = sira_puanlari
+
+    branslar = list(BRANS_KRITERLERI.keys())
+    onerilenler = []
+
+    for _, row in ham.iterrows():
+        en_yuksek = max(row[f"{b} SIRA"] for b in branslar)
+
+        if en_yuksek == 0:
+            onerilenler.append("REFERANS DIŞI")
+        else:
+            secilenler = [
+                b for b in branslar
+                if row[f"{b} SIRA"] == en_yuksek
+            ]
+            onerilenler.append(", ".join(secilenler))
+
+    ham["ÖNERİLEN BRANŞ"] = onerilenler
+    return ham
+
+
+def excel_olustur(ham):
+    temel_sutunlar = [
+        "S.N.",
+        "KURUM",
+        "BÖLGE",
+        "İLÇE",
+        "ANTRENÖR ADI",
+        "ÜYE NO",
+        "AD SOYAD",
+        "OKUL",
+        "TC KİMLİK",
+        "DOĞUM\nTARİHİ",
+        "DOĞUM\nYILI",
+        "CİNSİYET",
+        "VELİ TELEFON 1",
+    ]
+
+    test_ve_puan_sutunlari = []
+
+    for test in CIKTI_TEST_SIRASI:
+        if test in ham.columns and test not in test_ve_puan_sutunlari:
+            test_ve_puan_sutunlari.append(test)
+
+        puan_sutunu = f"{test} PUAN"
+
+        if puan_sutunu in ham.columns and puan_sutunu not in test_ve_puan_sutunlari:
+            test_ve_puan_sutunlari.append(puan_sutunu)
+
+    brans_sutunlari = [
+        "KARATE SONUÇ",
+        "TEKVANDO SONUÇ",
+        "BOKS SONUÇ",
+        "JUDO SONUÇ",
+        "GÜREŞ SONUÇ",
+        "ÖNERİLEN BRANŞ",
+    ]
+
+    kolonlar = [
+        c for c in temel_sutunlar + test_ve_puan_sutunlari + brans_sutunlari
+        if c in ham.columns
+    ]
+
+    temiz = ham[kolonlar].copy()
+
+    output = BytesIO()
+    temiz.to_excel(output, index=False)
+    output.seek(0)
+
+    wb = load_workbook(output)
+    ws = wb.active
+    basliklar = [cell.value for cell in ws[1]]
+
+    for test in CIKTI_TEST_SIRASI:
+        puan_sutunu = f"{test} PUAN"
+
+        if test not in basliklar or puan_sutunu not in ham.columns:
+            continue
+
+        col_no = basliklar.index(test) + 1
+
+        for i in range(len(temiz)):
+            puan = ham.iloc[i][puan_sutunu]
+
+            if puan in RENKLER:
+                fill = PatternFill(
+                    start_color=RENKLER[puan],
+                    end_color=RENKLER[puan],
+                    fill_type="solid",
+                )
+
+                ws.cell(row=i + 2, column=col_no).fill = fill
+
+    ince_kenar = Side(style="thin", color="000000")
+
+    tam_kenarlik = Border(
+        left=ince_kenar,
+        right=ince_kenar,
+        top=ince_kenar,
+        bottom=ince_kenar,
+    )
+
+    for row in ws.iter_rows():
+        for cell in row:
+            cell.font = Font(name="Calibri", size=12)
+            cell.alignment = Alignment(
+                horizontal="center",
+                vertical="center",
+                wrap_text=True,
+            )
+            cell.border = tam_kenarlik
+
+    for row_num in range(1, ws.max_row + 1):
+        ws.row_dimensions[row_num].height = 30
+
+    for column_cells in ws.columns:
+        max_length = 0
+        column_letter = get_column_letter(column_cells[0].column)
+
+        for cell in column_cells:
+            if cell.value is not None:
+                cell_value = str(cell.value)
+                longest_line = max(
+                    len(line)
+                    for line in cell_value.split("\n")
+                )
+                max_length = max(max_length, longest_line)
+
+        adjusted_width = max_length + 3
+        adjusted_width = max(10, min(adjusted_width, 35))
+        ws.column_dimensions[column_letter].width = adjusted_width
+
+    final = BytesIO()
+    wb.save(final)
+    final.seek(0)
+
+    return final
 
 
 def _norm_dosyasi_bul():
@@ -96,76 +522,20 @@ def _norm_dosyasi_bul():
     return None
 
 
-def _normlari_oku(kaynak):
-    sayfalar = pd.read_excel(kaynak, sheet_name=None, engine="openpyxl")
-    return {str(ad).strip().upper(): df for ad, df in sayfalar.items()}
+def _satir_degeri(row, adaylar, varsayilan=""):
+    for aday in adaylar:
+        if aday in row and pd.notna(row[aday]):
+            return row[aday]
+    return varsayilan
 
 
-def _aralik_uyuyor_mu(ifade, deger):
-    if pd.isna(ifade) or deger is None:
+def _dolu_deger_mi(deger):
+    if pd.isna(deger):
         return False
-
-    metin = str(ifade).strip().replace(",", ".")
-    sayilar = [float(s) for s in re.findall(r"\d+(?:\.\d+)?", metin)]
-
-    if not sayilar:
-        return False
-
-    if "≤" in metin or "<=" in metin:
-        return deger <= sayilar[0]
-
-    if "≥" in metin or ">=" in metin:
-        return deger >= sayilar[0]
-
-    if len(sayilar) >= 2:
-        alt = min(sayilar[0], sayilar[1])
-        ust = max(sayilar[0], sayilar[1])
-        return alt <= deger <= ust
-
-    return deger == sayilar[0]
+    return str(deger).strip() != ""
 
 
-def _norm_puani(normlar, sayfa_adi, cinsiyet, yas, deger):
-    deger = _sayi_yap(deger)
-    yas = _yas_hesapla(yas)
-
-    if deger is None or yas is None or not cinsiyet:
-        return None
-
-    df = normlar.get(sayfa_adi.strip().upper())
-    if df is None:
-        return None
-
-    df = df.copy()
-    df.columns = [str(k).strip().upper() for k in df.columns]
-
-    if "CİNSİYET" not in df.columns or "YAŞ" not in df.columns:
-        return None
-
-    satirlar = df[
-        (df["CİNSİYET"].map(_metin_norm) == _metin_norm(cinsiyet))
-        & (pd.to_numeric(df["YAŞ"], errors="coerce") == yas)
-    ]
-
-    if satirlar.empty:
-        return None
-
-    satir = satirlar.iloc[0]
-    for kolon, puan in NORM_PUANLARI.items():
-        if kolon in satir and _aralik_uyuyor_mu(satir[kolon], deger):
-            return puan
-
-    return None
-
-
-def _ilk_dolu_satir_degeri(satir, kolonlar):
-    for kolon in kolonlar:
-        if kolon in satir and pd.notna(satir[kolon]):
-            return satir[kolon]
-    return None
-
-
-def brans_amacli_sonuclari_hazirla(sporcular, testler, normlar):
+def brans_supabase_ham_verisi(sporcular, testler):
     birlesik = testler.merge(
         sporcular,
         left_on="sporcu_id",
@@ -176,109 +546,48 @@ def brans_amacli_sonuclari_hazirla(sporcular, testler, normlar):
 
     satirlar = []
 
-    for sira, (_, satir) in enumerate(birlesik.iterrows(), start=1):
-        yas_degeri = _ilk_dolu_satir_degeri(
-            satir,
-            ["yas", "yas_sporcu", "doğum_yılı", "dogum_yili", "dogum_yılı", "dogum_yili_sporcu"],
-        )
-        cinsiyet = _ilk_dolu_satir_degeri(satir, ["cinsiyet", "cinsiyet_sporcu", "cinsiyet_test"])
+    for sira, (_, row) in enumerate(birlesik.iterrows(), start=1):
+        dogum_yili = _satir_degeri(row, ["yas", "yas_sporcu", "dogum_yili", "doğum_yılı", "dogum yılı"])
+        dogum_tarihi = _satir_degeri(row, ["dogum_tarihi", "doğum_tarihi", "doğum tarihi"])
 
-        sonuc = {
+        ham_satiri = {
             "S.N.": sira,
-            "İLÇE": _ilk_dolu_satir_degeri(satir, ["ilce", "ilçe"]),
-            "AD SOYAD": _ilk_dolu_satir_degeri(satir, ["ad_soyad", "ad soyad"]),
-            "DOĞUM YILI": yas_degeri,
-            "YAŞ": _yas_hesapla(yas_degeri),
-            "CİNSİYET": cinsiyet,
+            "KURUM": _satir_degeri(row, ["kurum"]),
+            "BÖLGE": _satir_degeri(row, ["bolge", "bölge"]),
+            "İLÇE": _satir_degeri(row, ["ilce", "ilçe"]),
+            "ANTRENÖR ADI": _satir_degeri(row, ["antrenor_adi", "antrenör_adı", "antrenör adi"]),
+            "ÜYE NO": _satir_degeri(row, ["uye_no", "üye_no", "uye no", "id_sporcu"]),
+            "AD SOYAD": _satir_degeri(row, ["ad_soyad", "ad soyad"]),
+            "OKUL": _satir_degeri(row, ["okul"]),
+            "TC KİMLİK": _satir_degeri(row, ["tc_kimlik", "tc kimlik"]),
+            "CİNSİYET": _satir_degeri(row, ["cinsiyet", "cinsiyet_sporcu", "cinsiyet_test"]),
+            "VELİ TELEFON 1": _satir_degeri(row, ["veli_telefon_1", "veli telefon 1", "telefon"]),
+            "BOY": _satir_degeri(row, ["boy"]),
+            "KİLO": _satir_degeri(row, ["kilo"]),
+            "BACAK BOYU": _satir_degeri(row, ["bacak_boyu", "bacak boyu"]),
+            "OTURMA YÜKSEKLİĞİ": _satir_degeri(row, ["oturma_yuksekligi", "oturma_yüksekliği"]),
+            "KULAÇ": _satir_degeri(row, ["kulac", "kulaç"]),
+            "FONKSİYONEL ÇÖMELME": _satir_degeri(row, ["fonksiyonel_comelme", "fonksiyonel_çömelme"]),
+            "EL ÇABUKLUĞU": _satir_degeri(row, ["el_cabuklugu", "el_çabukluğu"]),
+            "AYAK ÇABUKLUĞU": _satir_degeri(row, ["ayak_cabuklugu", "ayak_çabukluğu"]),
+            "EL KAVRAMA": _satir_degeri(row, ["el_kavrama"]),
+            "SIRT BACAK": _satir_degeri(row, ["sirt_bacak", "sırt_bacak"]),
+            "HEXAGON": _satir_degeri(row, ["hexagon"]),
+            "DURARAK UZUN ATLAMA": _satir_degeri(row, ["durarak_uzun_atlama"]),
+            "GERİYE SAĞLIK TOPU ATMA": _satir_degeri(row, ["geriye_saglik_topu", "geriye_sağlık_topu"]),
+            "DİKEY SIÇRAMA": _satir_degeri(row, ["dikey_sicrama", "dikey_sıçrama"]),
+            "LANE AGILITY": _satir_degeri(row, ["lane_ceviklik", "lane_çeviklik"]),
+            "20 M. SPRINT": _satir_degeri(row, ["sprint20", "20m_sprint", "20_m_sprint"]),
         }
 
-        puan_kolonlari = []
+        if _dolu_deger_mi(dogum_yili):
+            ham_satiri["DOĞUM\nYILI"] = dogum_yili
+        elif _dolu_deger_mi(dogum_tarihi):
+            ham_satiri["DOĞUM\nTARİHİ"] = dogum_tarihi
 
-        for baslik, veri_kolonu, norm_sayfasi in BRANS_TESTLERI:
-            deger = satir[veri_kolonu] if veri_kolonu in satir else None
-            puan = _norm_puani(normlar, norm_sayfasi, cinsiyet, yas_degeri, deger)
-            puan_kolon = f"{baslik} PUAN"
-
-            sonuc[baslik] = deger
-            sonuc[puan_kolon] = puan
-            puan_kolonlari.append(puan_kolon)
-
-        sonuc["TOPLAM PUAN"] = sum(sonuc[k] for k in puan_kolonlari if sonuc[k] is not None)
-        satirlar.append(sonuc)
+        satirlar.append(ham_satiri)
 
     return pd.DataFrame(satirlar)
-
-
-def _puan_renk_css(deger):
-    renkler = {
-        4: "background-color: #f4cccc;",
-        8: "background-color: #fce5cd;",
-        12: "background-color: #fff2cc;",
-        16: "background-color: #d9ead3;",
-        20: "background-color: #b6d7a8;",
-    }
-    return renkler.get(deger, "")
-
-
-def brans_puan_stili(df, puan_kolonlari):
-    styler = df.style
-
-    if hasattr(styler, "map"):
-        return styler.map(_puan_renk_css, subset=puan_kolonlari)
-
-    return styler.apply(lambda seri: seri.map(_puan_renk_css), subset=puan_kolonlari)
-
-
-def brans_excel_olustur(df):
-    from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
-
-    cikti = BytesIO()
-
-    with pd.ExcelWriter(cikti, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="Branş Amaçlı")
-        ws = writer.sheets["Branş Amaçlı"]
-
-        header_fill = PatternFill("solid", fgColor="D9EAF7")
-        total_fill = PatternFill("solid", fgColor="B4C6E7")
-        fills = {
-            4: PatternFill("solid", fgColor="F4CCCC"),
-            8: PatternFill("solid", fgColor="FCE5CD"),
-            12: PatternFill("solid", fgColor="FFF2CC"),
-            16: PatternFill("solid", fgColor="D9EAD3"),
-            20: PatternFill("solid", fgColor="B6D7A8"),
-        }
-        ince = Side(style="thin", color="D9D9D9")
-        kenarlik = Border(left=ince, right=ince, top=ince, bottom=ince)
-
-        ws.freeze_panes = "A2"
-        ws.auto_filter.ref = ws.dimensions
-
-        for cell in ws[1]:
-            cell.fill = header_fill
-            cell.font = Font(bold=True)
-            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-            cell.border = kenarlik
-
-        for row in ws.iter_rows(min_row=2):
-            for cell in row:
-                baslik = ws.cell(1, cell.column).value
-                cell.alignment = Alignment(horizontal="center", vertical="center")
-                cell.border = kenarlik
-
-                if baslik and "PUAN" in str(baslik):
-                    cell.fill = fills.get(cell.value, PatternFill(fill_type=None))
-
-                if baslik == "TOPLAM PUAN":
-                    cell.fill = total_fill
-                    cell.font = Font(bold=True)
-
-        for col in ws.columns:
-            baslik = str(col[0].value or "")
-            genislik = min(max(len(baslik) + 2, 10), 28)
-            ws.column_dimensions[col[0].column_letter].width = genislik
-
-    cikti.seek(0)
-    return cikti.getvalue()
 
 
 SAYFALAR = [
@@ -589,7 +898,7 @@ elif sayfa == "🏅 Branş Amaçlı":
     else:
         norm_dosyasi = _norm_dosyasi_bul()
         yuklenen_norm = st.file_uploader(
-            "Norm tablosu",
+            "Norm tablo Excel dosyasını yükle",
             type=["xlsx"],
             help="NORM TABLO.xlsx bulunamazsa buradan yükleyebilirsiniz.",
         )
@@ -599,39 +908,55 @@ elif sayfa == "🏅 Branş Amaçlı":
         if kaynak is None:
             st.error("NORM TABLO.xlsx bulunamadı. Norm dosyasını bu sayfadan yükleyin.")
         else:
-            try:
-                normlar = _normlari_oku(kaynak)
-                sonuc = brans_amacli_sonuclari_hazirla(sporcular, testler, normlar)
+            ham = brans_supabase_ham_verisi(sporcular, testler)
 
-                puan_kolonlari = [kolon for kolon in sonuc.columns if "PUAN" in kolon]
+            metrik1, metrik2, metrik3 = st.columns(3)
 
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Sporcu", len(sonuc))
-                with col2:
-                    st.metric("Puanlanan Test", len(puan_kolonlari) - 1)
-                with col3:
-                    st.metric("En Yüksek Toplam", int(sonuc["TOPLAM PUAN"].max()))
+            with metrik1:
+                st.metric("Yüklenen Öğrenci", len(ham))
 
-                st.subheader("Branş Amaçlı Puanlama Sonuçları")
+            with metrik2:
+                st.metric("Branş", "5")
 
-                st.dataframe(
-                    brans_puan_stili(sonuc, puan_kolonlari),
-                    use_container_width=True,
-                    hide_index=True,
-                )
+            with metrik3:
+                st.metric("Test / Ölçüm Alanı", "17")
 
-                excel = brans_excel_olustur(sonuc)
+            st.subheader("Ham Veri Önizleme")
+            st.dataframe(ham.head(), use_container_width=True)
 
-                st.download_button(
-                    "Excel Çıktısını İndir",
-                    data=excel,
-                    file_name="brans_amacli_puanlama.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                )
+            if st.button("Puanla ve Branşları Hesapla"):
+                try:
+                    sonuc = islem_yap(ham.copy(), kaynak)
 
-            except Exception as e:
-                st.error(f"Branş amaçlı puanlama oluşturulamadı: {e}")
+                    st.write("İşlenen sonuç öğrenci sayısı:", len(sonuc))
+
+                    st.subheader("Sonuç Önizleme")
+                    onizleme_kolonlari = [
+                        "AD SOYAD",
+                        "KARATE SONUÇ",
+                        "TEKVANDO SONUÇ",
+                        "BOKS SONUÇ",
+                        "JUDO SONUÇ",
+                        "GÜREŞ SONUÇ",
+                        "ÖNERİLEN BRANŞ",
+                    ]
+                    st.dataframe(
+                        sonuc[[c for c in onizleme_kolonlari if c in sonuc.columns]].head(30),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+
+                    excel_dosya = excel_olustur(sonuc)
+
+                    st.download_button(
+                        label="Sonuç Excel Dosyasını İndir",
+                        data=excel_dosya,
+                        file_name="USGEP_SONUCLAR.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
+
+                except Exception as e:
+                    st.error(str(e))
 
 
 # ---------------------------
