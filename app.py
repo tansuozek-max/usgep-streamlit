@@ -220,6 +220,15 @@ def _puan_renk_css(deger):
     return renkler.get(deger, "")
 
 
+def brans_puan_stili(df, puan_kolonlari):
+    styler = df.style
+
+    if hasattr(styler, "map"):
+        return styler.map(_puan_renk_css, subset=puan_kolonlari)
+
+    return styler.apply(lambda seri: seri.map(_puan_renk_css), subset=puan_kolonlari)
+
+
 def brans_excel_olustur(df):
     from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
 
@@ -607,7 +616,7 @@ elif sayfa == "🏅 Branş Amaçlı":
                 st.subheader("Branş Amaçlı Puanlama Sonuçları")
 
                 st.dataframe(
-                    sonuc.style.applymap(_puan_renk_css, subset=puan_kolonlari),
+                    brans_puan_stili(sonuc, puan_kolonlari),
                     use_container_width=True,
                     hide_index=True,
                 )
