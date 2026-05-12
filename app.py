@@ -84,7 +84,7 @@ def norm_puani_bul(norm_df, test_adi, cinsiyet, yas, sonuc):
             if sonuc >= limit:
                 return puan
 
-                elif "-" in aralik:
+        elif "-" in aralik:
 
             aralik = aralik.replace(" ", "")
             parcalar = aralik.split("-")
