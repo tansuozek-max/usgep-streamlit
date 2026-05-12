@@ -29,15 +29,7 @@ def temiz_deger_mi(deger):
     return deger not in [None, "", 0, 0.0]
 
 
-with st.sidebar:
-    logo_yolu = Path(__file__).parent / "logo.png"
-
-    if logo_yolu.exists():
-        st.image(str(logo_yolu), width=180)
-
-    st.title("USGEP Menü")
-
-[
+SAYFALAR = [
     "🏠 Ana Sayfa",
     "🧒 Sporcu Kayıt",
     "📋 Test Veri Girişi",
@@ -45,8 +37,17 @@ with st.sidebar:
     "📈 Dashboard",
     "🧪 Ön Testler",
     "🇪🇺 Eurofit",
-    "🏅 Branş Amaçlı"
+    "🏅 Branş Amaçlı",
 ]
+
+with st.sidebar:
+    logo_yolu = Path(__file__).parent / "logo.png"
+
+    if logo_yolu.exists():
+        st.image(str(logo_yolu), width=180)
+
+    st.title("USGEP Menü")
+    sayfa = st.radio("Sayfa seç", SAYFALAR, label_visibility="collapsed")
 
 test_modu = st.query_params.get("test", "normal")
 
@@ -530,3 +531,4 @@ if test_modu in TEST_ISTASYONLARI:
 
                 st.success(f'{test["etiket"]} kaydedildi.')
                 st.rerun()
+
