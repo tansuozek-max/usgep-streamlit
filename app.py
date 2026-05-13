@@ -4,29 +4,63 @@ import re
 import unicodedata
 from io import BytesIO
 from pathlib import Path
-from openpyxl import load_workbook
+from openpyxl import load_workbook, Workbook
+from openpyxl.cell import WriteOnlyCell
 from openpyxl.styles import PatternFill, Alignment, Font, Border, Side
 from openpyxl.utils import get_column_letter
-from supabase import create_client
+try:
+    from supabase import create_client
+except Exception:
+    create_client = None
 
 st.set_page_config(
     page_title="USGEP Branş Yönlendirme",
     layout="wide"
 )
 
-SUPABASE_URL = st.secrets["SUPABASE_URL"]
-SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
-ADMIN_PASSWORD = st.secrets["ADMIN_PASSWORD"]
+try:
+    SUPABASE_URL = st.secrets["SUPABASE_URL"]
+    SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+    ADMIN_PASSWORD = st.secrets["ADMIN_PASSWORD"]
+except Exception:
+    SUPABASE_URL = None
+    SUPABASE_KEY = None
+    ADMIN_PASSWORD = None
 
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+if create_client is not None:
+    try:
+        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+    except Exception:
+        supabase = None
+else:
+    supabase = None
+
+
+def supabase_gerekli_uyari():
+    st.warning(
+        "Bu sayfa Supabase bağlantısı gerektirir. Lokal testte Supabase paketi "
+        "veya ayarları yoksa bu bölüm kullanılamaz."
+    )
+    st.info("Ön Testler sayfası Supabase olmadan Excel dosyalarıyla çalışmaya devam eder.")
+
+
+def supabase_hazir_mi():
+    if supabase is None:
+        supabase_gerekli_uyari()
+        return False
+    return True
 
 
 def sporculari_getir():
+    if supabase is None:
+        return pd.DataFrame()
     data = supabase.table("sporcular").select("*").order("id").execute()
     return pd.DataFrame(data.data)
 
 
 def testleri_getir():
+    if supabase is None:
+        return pd.DataFrame()
     data = supabase.table("testler").select("*").order("id").execute()
     return pd.DataFrame(data.data)
 
@@ -616,11 +650,13 @@ ON_TEST_TERS_SEVIYE = {
     "ÇOK ÜSTÜ": "ÇOK ALTI",
 }
 
+ON_TEST_REFERANS_YILI = 2026
+
 ON_TEST_BARAJLARI = {
-    7: 50,
-    8: 60,
-    9: 70,
-    10: 70,
+    2016: 70,
+    2017: 70,
+    2018: 60,
+    2019: 50,
 }
 
 ON_TESTLER = {
@@ -658,6 +694,87 @@ ON_TESTLER = {
 }
 
 
+ON_TEST_CIKTI_KOLONLARI = [
+    "S.N.",
+    "KURUM",
+    "BÖLGE",
+    "İLÇE",
+    "ANTRENÖR ADI",
+    "ÜYE NO",
+    "AD SOYAD",
+    "OKUL",
+    "TC KİMLİK",
+    "DOĞUM TARİHİ",
+    "DOĞUM YILI",
+    "CİNSİYET",
+    "VELİ TELEFON 1",
+    "VELİ TELEFON 2",
+    "ZİHİNSEL VEYA FİZİKSEL ENGEL DURUMU (VAR / YOK)",
+    "DERS DÜZENİNE UYUM SEVİYESİ (ÇOK DÜŞÜK / ORTA / ÇOK YÜKSEK)",
+    "BİLİNMESİ GEREKEN DETAYLAR",
+    "ÖLÇÜM TARİHİ",
+    "BOY",
+    "BOY AÇIKLAMA",
+    "KULAÇ",
+    "KULAÇ AÇIKLAMA",
+    "OTUR UZAN",
+    "OTUR UZAN PUAN",
+    "DURARAK UZUN ATLAMA",
+    "DURARAK UZUN ATLAMA PUAN",
+    "MEKİK (30 sn)",
+    "MEKİK (30 sn) PUAN",
+    "20 m. SPRINT",
+    "20 m. SPRINT PUAN",
+    "TOPLAM PUAN",
+    "DURUMU",
+]
+
+ON_TEST_CIKTI_KAYNAK_ESLESME = {
+    "S.N.": ["SIRA", "SIRA NO", "SN", "NO"],
+    "KURUM": ["KURUM", "KULÜP", "KULUP"],
+    "BÖLGE": ["BÖLGE", "BOLGE"],
+    "İLÇE": ["İLÇE", "ILCE"],
+    "ANTRENÖR ADI": ["ANTRENÖR ADI", "ANTRENOR ADI", "ANTRENÖR", "ANTRENOR"],
+    "ÜYE NO": ["ÜYE NO", "UYE NO", "ÜYE NUMARASI", "UYE NUMARASI"],
+    "AD SOYAD": ["AD SOYAD", "ADI SOYADI", "SPORCU ADI", "AD_SOYAD"],
+    "OKUL": ["OKUL", "OKUL ADI"],
+    "TC KİMLİK": ["TC KİMLİK", "TC KIMLIK", "TC", "TCKN", "TC NO", "TC_NO"],
+    "DOĞUM TARİHİ": ["DOĞUM TARİHİ", "DOGUM TARIHI", "DOĞUM\nTARİHİ", "DOGUM_TARIHI"],
+    "DOĞUM YILI": ["DOĞUM YILI", "DOGUM YILI", "DOĞUM\nYILI", "DOGUM_YILI"],
+    "CİNSİYET": ["CİNSİYET", "CINSIYET"],
+    "VELİ TELEFON 1": ["VELİ TELEFON 1", "VELI TELEFON 1", "VELİ TEL 1", "VELI TEL 1"],
+    "VELİ TELEFON 2": ["VELİ TELEFON 2", "VELI TELEFON 2", "VELİ TEL 2", "VELI TEL 2"],
+    "ZİHİNSEL VEYA FİZİKSEL ENGEL DURUMU (VAR / YOK)": [
+        "ZİHİNSEL VEYA FİZİKSEL ENGEL DURUMU (VAR / YOK)",
+        "ZIHINSEL VEYA FIZIKSEL ENGEL DURUMU",
+        "ENGEL DURUMU",
+    ],
+    "DERS DÜZENİNE UYUM SEVİYESİ (ÇOK DÜŞÜK / ORTA / ÇOK YÜKSEK)": [
+        "DERS DÜZENİNE UYUM SEVİYESİ (ÇOK DÜŞÜK / ORTA / ÇOK YÜKSEK)",
+        "DERS DUZENINE UYUM SEVIYESI",
+        "DERS DÜZENİNE UYUM",
+        "DERS DUZENINE UYUM",
+    ],
+    "BİLİNMESİ GEREKEN DETAYLAR": ["BİLİNMESİ GEREKEN DETAYLAR", "BILINMESI GEREKEN DETAYLAR", "DETAYLAR", "AÇIKLAMA"],
+    "ÖLÇÜM TARİHİ": ["ÖLÇÜM TARİHİ", "OLCUM TARIHI", "ÖLÇÜM\nTARİHİ", "OLCUM_TARIHI"],
+    "MEKİK (30 sn)": ["MEKİK", "MEKIK", "MEKİK (30 sn)", "MEKIK (30 sn)"],
+    "MEKİK (30 sn) PUAN": ["MEKİK PUAN", "MEKIK PUAN", "MEKİK (30 sn) PUAN"],
+    "20 m. SPRINT": ["20 M. SPRINT", "20 m. SPRINT", "20M SPRINT", "SPRINT"],
+    "20 m. SPRINT PUAN": ["20 M. SPRINT PUAN", "20 m. SPRINT PUAN", "20M SPRINT PUAN", "SPRINT PUAN"],
+    "TOPLAM PUAN": ["TOPLAM ÖN TEST PUANI", "TOPLAM PUAN"],
+    "DURUMU": ["EUROFIT DURUMU", "DURUMU"],
+}
+
+ON_TEST_RENKLI_CIKTI_TESTLERI = {
+    "BOY": "BOY",
+    "KULAÇ": "KULAÇ",
+    "OTUR UZAN": "OTUR UZAN",
+    "DURARAK UZUN ATLAMA": "DURARAK UZUN ATLAMA",
+    "MEKİK (30 sn)": "MEKİK",
+    "20 m. SPRINT": "20 M. SPRINT",
+}
+
+
 def on_test_normalize_text(x):
     x = str(x).strip().upper()
     x = unicodedata.normalize("NFKD", x)
@@ -669,6 +786,58 @@ def on_test_normalize_text(x):
 
 def on_test_temizle_metin(x):
     return str(x).strip().upper()
+
+
+def on_test_cikti_normalize_text(x):
+    x = on_test_normalize_text(x)
+    x = x.replace("_", " ")
+    x = re.sub(r"[^A-Z0-9]+", " ", x)
+    return re.sub(r"\s+", " ", x).strip()
+
+
+def on_test_cikti_kolon_bul(df, hedef_baslik):
+    eslesmeler = ON_TEST_CIKTI_KAYNAK_ESLESME.get(hedef_baslik, [])
+
+    if hedef_baslik in ["TOPLAM PUAN", "DURUMU"]:
+        adaylar = eslesmeler + [hedef_baslik]
+    else:
+        adaylar = [hedef_baslik] + eslesmeler
+
+    for aday in adaylar:
+        if aday in df.columns:
+            return aday
+
+    normalized_cols = {
+        on_test_cikti_normalize_text(col): col
+        for col in df.columns
+    }
+
+    for aday in adaylar:
+        aday_norm = on_test_cikti_normalize_text(aday)
+        if aday_norm in normalized_cols:
+            return normalized_cols[aday_norm]
+
+    return None
+
+
+def on_test_cikti_tablosu_hazirla(ham):
+    cikti = pd.DataFrame(index=ham.index)
+
+    for baslik in ON_TEST_CIKTI_KOLONLARI:
+        kaynak = on_test_cikti_kolon_bul(ham, baslik)
+
+        if kaynak is None:
+            cikti[baslik] = ""
+        else:
+            cikti[baslik] = ham[kaynak].values
+
+    eurofit_kolon = on_test_cikti_kolon_bul(ham, "EUROFIT DURUMU")
+    if eurofit_kolon is not None:
+        durum = cikti["DURUMU"].astype(str).str.strip()
+        bos_durumlar = durum.isin(["", "nan", "NaN", "None"])
+        cikti.loc[bos_durumlar, "DURUMU"] = ham.loc[bos_durumlar, eurofit_kolon].values
+
+    return cikti.reset_index(drop=True)
 
 
 def on_test_sayiya_cevir(x):
@@ -860,6 +1029,22 @@ def on_test_veriyi_standartlastir(ham):
     return ham
 
 
+def on_test_dogum_yili_serisi(ham):
+    dogum_yili_col = on_test_kolon_bul(ham, ["DOĞUM YILI", "DOGUM YILI"])
+    yas_col = "YAŞ" if "YAŞ" in ham.columns else on_test_kolon_bul(ham, ["YAŞ", "YAS"])
+
+    if dogum_yili_col:
+        dogum_yili = pd.to_numeric(ham[dogum_yili_col], errors="coerce")
+    else:
+        dogum_yili = pd.Series([pd.NA] * len(ham), index=ham.index)
+
+    if yas_col:
+        yas = pd.to_numeric(ham[yas_col], errors="coerce")
+        dogum_yili = dogum_yili.fillna(ON_TEST_REFERANS_YILI - yas)
+
+    return dogum_yili
+
+
 def on_test_norm_satiri_ters_mi(norm_kurallari):
     cok_alti = on_test_aralik_ilk_sayi(norm_kurallari.get("ÇOK ALTI"))
     cok_ustu = on_test_aralik_ilk_sayi(norm_kurallari.get("ÇOK ÜSTÜ"))
@@ -894,10 +1079,12 @@ def on_test_norm_seviye_bul(deger, norm_kurallari, ters_mantik=False):
 
 def on_test_kriter_hesapla(ham, puan_sutunlari):
     ham["TOPLAM ÖN TEST PUANI"] = ham[puan_sutunlari].sum(axis=1)
-    barajlar = ham["YAŞ"].map(ON_TEST_BARAJLARI)
-    cagrilacak = barajlar.notna() & (ham["TOPLAM ÖN TEST PUANI"] >= barajlar)
-    ham["EUROFIT DURUMU"] = "ÇAĞRILMAYACAK"
-    ham.loc[cagrilacak, "EUROFIT DURUMU"] = "ÇAĞRILACAK"
+    dogum_yillari = on_test_dogum_yili_serisi(ham)
+    barajlar = dogum_yillari.map(ON_TEST_BARAJLARI)
+    secildi = barajlar.notna() & (ham["TOPLAM ÖN TEST PUANI"] >= barajlar)
+    ham["EUROFIT DURUMU"] = "SEÇİLMEDİ"
+    ham.loc[secildi, "EUROFIT DURUMU"] = "1. AŞAMA SEÇİLDİ"
+    ham["DURUMU"] = ham["EUROFIT DURUMU"]
     return ham
 
 
@@ -956,58 +1143,28 @@ def on_test_degerlendir(ham, norm_dosya):
     return ham
 
 
+def on_test_excel_hucre_degeri(deger):
+    if isinstance(deger, pd.Timestamp):
+        return deger.to_pydatetime()
+
+    try:
+        if pd.isna(deger):
+            return None
+    except Exception:
+        pass
+
+    return deger
+
+
 def on_test_excel_olustur(ham):
-    kimlik_sutunlari = [
-        "S.N.",
-        "AD SOYAD",
-        "OKUL",
-        "İLÇE",
-        "DOĞUM\nTARİHİ",
-        "DOĞUM\nYILI",
-        "CİNSİYET",
-        "YAŞ",
-    ]
+    temiz = on_test_cikti_tablosu_hazirla(ham)
 
-    test_sutunlari = []
-    for test, bilgi in ON_TESTLER.items():
-        if test in ham.columns:
-            test_sutunlari.append(test)
+    wb = Workbook(write_only=True)
+    ws = wb.create_sheet("Ön Testler")
 
-        aciklama_sutunu = f"{test} AÇIKLAMA"
-        if not bilgi["puanlanir"] and aciklama_sutunu in ham.columns:
-            test_sutunlari.append(aciklama_sutunu)
+    if "Sheet" in wb.sheetnames:
+        del wb["Sheet"]
 
-        puan_sutunu = f"{test} PUAN"
-        if bilgi["puanlanir"] and puan_sutunu in ham.columns:
-            test_sutunlari.append(puan_sutunu)
-
-    sonuc_sutunlari = [
-        "TOPLAM ÖN TEST PUANI",
-        "EUROFIT DURUMU",
-    ]
-
-    kolonlar = [
-        c for c in kimlik_sutunlari + test_sutunlari + sonuc_sutunlari
-        if c in ham.columns
-    ]
-
-    temiz = ham[kolonlar].copy()
-
-    output = BytesIO()
-
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        temiz.to_excel(writer, index=False, sheet_name="Ön Testler")
-        ws = writer.sheets["Ön Testler"]
-
-    output.seek(0)
-
-    wb = load_workbook(output)
-    ws = wb["Ön Testler"]
-    basliklar = [cell.value for cell in ws[1]]
-    baslik_index = {
-        baslik: sira + 1
-        for sira, baslik in enumerate(basliklar)
-    }
     seviye_fills = {
         seviye: PatternFill(
             start_color=renk,
@@ -1017,55 +1174,59 @@ def on_test_excel_olustur(ham):
         for seviye, renk in ON_TEST_RENKLER.items()
     }
 
-    ws.freeze_panes = "A2"
-    ws.auto_filter.ref = ws.dimensions
-
     header_fill = PatternFill(
         start_color="D9EAF7",
         end_color="D9EAF7",
         fill_type="solid",
     )
+    header_font = Font(name="Calibri", size=12, bold=True)
 
-    for cell in ws[1]:
-        cell.font = Font(name="Calibri", size=12, bold=True)
-        cell.fill = header_fill
-        cell.alignment = Alignment(
-            horizontal="center",
-            vertical="center",
-            wrap_text=True,
+    basliklar = list(temiz.columns)
+    baslik_index = {
+        baslik: sira
+        for sira, baslik in enumerate(basliklar)
+    }
+    test_seviyeleri = {}
+
+    for cikti_test, kaynak_test in ON_TEST_RENKLI_CIKTI_TESTLERI.items():
+        seviye_sutunu = f"{kaynak_test} SEVİYE"
+
+        if cikti_test in baslik_index and seviye_sutunu in ham.columns:
+            test_seviyeleri[baslik_index[cikti_test]] = (
+                ham[seviye_sutunu].reset_index(drop=True).tolist()
+            )
+
+    ws.freeze_panes = "A2"
+
+    if basliklar:
+        ws.auto_filter.ref = (
+            f"A1:{get_column_letter(len(basliklar))}{len(temiz) + 1}"
         )
 
-    for test in ON_TESTLER:
-        seviye_sutunu = f"{test} SEVİYE"
+    header_row = []
+    for baslik in basliklar:
+        cell = WriteOnlyCell(ws, value=baslik)
+        cell.fill = header_fill
+        cell.font = header_font
+        header_row.append(cell)
 
-        if test not in baslik_index or seviye_sutunu not in ham.columns:
-            continue
+    ws.append(header_row)
 
-        test_col_no = baslik_index[test]
-        seviyeler = ham[seviye_sutunu].tolist()
+    for satir_no, satir in enumerate(temiz.itertuples(index=False, name=None)):
+        excel_satiri = []
 
-        for row_offset, seviye in enumerate(seviyeler, start=2):
-            if row_offset > ws.max_row:
-                break
+        for col_no, deger in enumerate(satir):
+            cell = WriteOnlyCell(ws, value=on_test_excel_hucre_degeri(deger))
+            seviyeler = test_seviyeleri.get(col_no)
 
-            if seviye in seviye_fills:
-                ws.cell(row=row_offset, column=test_col_no).fill = seviye_fills[seviye]
+            if seviyeler is not None:
+                seviye = seviyeler[satir_no]
+                if seviye in seviye_fills:
+                    cell.fill = seviye_fills[seviye]
 
-    ws.row_dimensions[1].height = 30
+            excel_satiri.append(cell)
 
-    for baslik, col_no in baslik_index.items():
-        column_letter = get_column_letter(col_no)
-
-        if baslik == "AD SOYAD":
-            ws.column_dimensions[column_letter].width = 28
-        elif baslik in ["EUROFIT DURUMU", "TOPLAM ÖN TEST PUANI"]:
-            ws.column_dimensions[column_letter].width = 20
-        elif "AÇIKLAMA" in str(baslik):
-            ws.column_dimensions[column_letter].width = 16
-        elif "DURARAK UZUN ATLAMA" in str(baslik):
-            ws.column_dimensions[column_letter].width = 24
-        else:
-            ws.column_dimensions[column_letter].width = 13
+        ws.append(excel_satiri)
 
     final = BytesIO()
     wb.save(final)
@@ -1137,6 +1298,8 @@ if sayfa == "🏠 Ana Sayfa":
 elif sayfa == "🧒 Sporcu Kayıt":
 
     st.title("Sporcu Kayıt")
+    if not supabase_hazir_mi():
+        st.stop()
 
     st.subheader("Tekli Sporcu Kayıt")
 
@@ -1234,6 +1397,8 @@ elif sayfa == "🧒 Sporcu Kayıt":
 elif sayfa == "📋 Test Veri Girişi":
 
     st.title("Test Veri Girişi")
+    if not supabase_hazir_mi():
+        st.stop()
 
     sporcular = sporculari_getir()
 
@@ -1278,6 +1443,8 @@ elif sayfa == "📋 Test Veri Girişi":
 elif sayfa == "📊 Sonuçlar":
 
     st.title("Sonuçlar")
+    if not supabase_hazir_mi():
+        st.stop()
 
     sporcular = sporculari_getir()
     testler = testleri_getir()
@@ -1306,6 +1473,8 @@ elif sayfa == "📊 Sonuçlar":
 elif sayfa == "📈 Dashboard":
 
     st.title("Dashboard")
+    if not supabase_hazir_mi():
+        st.stop()
 
     sporcular = sporculari_getir()
     testler = testleri_getir()
@@ -1399,7 +1568,7 @@ elif sayfa == "🧪 Ön Testler":
             if "on_test_sonuc" in st.session_state:
                 on_test_sonuc = st.session_state["on_test_sonuc"]
                 cagrilacak = on_test_sonuc[
-                    on_test_sonuc["EUROFIT DURUMU"] == "ÇAĞRILACAK"
+                    on_test_sonuc["EUROFIT DURUMU"] == "1. AŞAMA SEÇİLDİ"
                 ].copy()
                 cagrilmayacak_sayi = len(on_test_sonuc) - len(cagrilacak)
 
@@ -1409,36 +1578,17 @@ elif sayfa == "🧪 Ön Testler":
                     st.metric("Toplam Öğrenci", len(on_test_sonuc))
 
                 with ozet2:
-                    st.metric("Çağrılacak Öğrenci", len(cagrilacak))
+                    st.metric("1. Aşama Seçilen Öğrenci", len(cagrilacak))
 
                 with ozet3:
-                    st.metric("Çağrılmayacak Öğrenci", cagrilmayacak_sayi)
+                    st.metric("Seçilmeyen Öğrenci", cagrilmayacak_sayi)
 
                 st.subheader("Ön Test Sonuç Önizleme")
 
-                on_test_onizleme = [
-                    "S.N.",
-                    "AD SOYAD",
-                    "CİNSİYET",
-                    "YAŞ",
-                    "BOY",
-                    "BOY AÇIKLAMA",
-                    "KULAÇ",
-                    "KULAÇ AÇIKLAMA",
-                    "OTUR UZAN",
-                    "OTUR UZAN PUAN",
-                    "DURARAK UZUN ATLAMA",
-                    "DURARAK UZUN ATLAMA PUAN",
-                    "MEKİK",
-                    "MEKİK PUAN",
-                    "20 M. SPRINT",
-                    "20 M. SPRINT PUAN",
-                    "TOPLAM ÖN TEST PUANI",
-                    "EUROFIT DURUMU",
-                ]
+                on_test_onizleme = on_test_cikti_tablosu_hazirla(on_test_sonuc)
 
                 st.dataframe(
-                    on_test_sonuc[[c for c in on_test_onizleme if c in on_test_sonuc.columns]],
+                    on_test_onizleme,
                     use_container_width=True,
                     hide_index=True,
                 )
@@ -1461,17 +1611,17 @@ elif sayfa == "🧪 Ön Testler":
                         )
 
                 with indirme2:
-                    if st.button("Eurofit’e Çağrılacaklar Excel Hazırla", key="on_test_excel_cagrilacak_hazirla"):
-                        with st.spinner("Eurofit’e çağrılacaklar Excel çıktısı hazırlanıyor..."):
+                    if st.button("1. Aşama Seçilenler Excel Hazırla", key="on_test_excel_cagrilacak_hazirla"):
+                        with st.spinner("1. aşama seçilenler Excel çıktısı hazırlanıyor..."):
                             st.session_state["on_test_excel_cagrilacak"] = on_test_excel_olustur(
                                 cagrilacak
                             ).getvalue()
 
                     if "on_test_excel_cagrilacak" in st.session_state:
                         st.download_button(
-                            label="Eurofit’e Çağrılacaklar Excel İndir",
+                            label="1. Aşama Seçilenler Excel İndir",
                             data=st.session_state["on_test_excel_cagrilacak"],
-                            file_name="USGEP_ON_TEST_EUROFIT_CAGRILACAKLAR.xlsx",
+                            file_name="USGEP_ON_TEST_1_ASAMA_SECILENLER.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         )
 
@@ -1486,6 +1636,8 @@ elif sayfa == "🧪 Ön Testler":
 elif sayfa == "🇪🇺 Eurofit":
 
     st.title("Eurofit")
+    if not supabase_hazir_mi():
+        st.stop()
 
     st.info("Bu sayfada Eurofit testleri için değerlendirme, puanlama ve renklendirme yapılacak.")
 
@@ -1506,6 +1658,8 @@ elif sayfa == "🇪🇺 Eurofit":
 elif sayfa == "🏅 Branş Amaçlı":
 
     st.title("Branş Amaçlı")
+    if not supabase_hazir_mi():
+        st.stop()
 
     sporcular = sporculari_getir()
     testler = testleri_getir()
@@ -1695,6 +1849,8 @@ if test_modu in TEST_ISTASYONLARI:
     test = TEST_ISTASYONLARI[test_modu]
 
     st.title(test["baslik"])
+    if not supabase_hazir_mi():
+        st.stop()
 
     sporcular = sporculari_getir()
 
